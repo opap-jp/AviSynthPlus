@@ -5,6 +5,9 @@
 #include <unordered_map>
 #include <new>
 
+#include <assert.h>
+#define Assert assert
+
 template <typename T>
 class ObjectPool
 {

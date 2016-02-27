@@ -4,13 +4,13 @@
 #define AvsGitURL "https://github.com/pylorak/avisynth"
 #define AvsWebURL "http://www.avs-plus.net"
 
-#define BuildDir32 "..\..\..\build-vs2013-x86"
-#define BuildDir64 "..\..\..\build-vs2013-x64"
+#define BuildDir32 "..\..\vs32"
+#define BuildDir64 "..\..\vs64"
 
-#define VcVersion "Microsoft Visual C++ Redistributable 2013"
+#define VcVersion "Microsoft Visual C++ Redistributable 2015"
 #define BuildDate GetFileDateTimeString(AddBackslash(BuildDir32) + "Output\AviSynth.dll", 'yyyy/mm/dd', '-',);
 
-#expr Exec("powershell", "-ExecutionPolicy unrestricted -File update_git_rev.ps1", SourcePath, 1)
+;#expr Exec("powershell", "-ExecutionPolicy unrestricted -File update_git_rev.ps1", SourcePath, 1)
 #define IniFile AddBackslash(SourcePath) + "git_rev.ini"
 #define RevisionNumber  ReadIni(IniFile, "Version", "RevisionNumber" )
 #define Revision        ReadIni(IniFile, "Version", "Revision"       )
@@ -57,17 +57,17 @@ Name: "full"; Description: "{cm:FullInstallation}"
 Name: "custom"; Description: "{cm:CustomInstallation}"; Flags: iscustom
 
 [Languages]
-Name: "en"; MessagesFile: "Translations\en.isl"; LicenseFile: ..\gpl.txt
-Name: "pt_br"; MessagesFile: "Translations\pt_br.isl"; LicenseFile: ..\gpl-pt_br.txt
-Name: "cs"; MessagesFile: "Translations\cs.isl"; LicenseFile: ..\gpl-cs.txt
-Name: "fr"; MessagesFile: "Translations\fr.isl"; LicenseFile: ..\gpl-fr.txt
-Name: "de"; MessagesFile: "Translations\de.isl"; LicenseFile: ..\gpl-de.txt
+Name: "en"; MessagesFile: "Translations\en.isl"; LicenseFile: ..\license.txt
+Name: "pt_br"; MessagesFile: "Translations\pt_br.isl"; LicenseFile: ..\license.txt
+Name: "cs"; MessagesFile: "Translations\cs.isl"; LicenseFile: ..\license.txt
+Name: "fr"; MessagesFile: "Translations\fr.isl"; LicenseFile: ..\license.txt
+Name: "de"; MessagesFile: "Translations\de.isl"; LicenseFile: ..\license.txt
 ;Name: "gr"; MessagesFile: "compiler:Languages\Greek.isl"
-Name: "it"; MessagesFile: "Translations\it.isl"; LicenseFile: ..\gpl-it.txt
-Name: "ja"; MessagesFile: "Translations\ja.isl"; LicenseFile: ..\gpl-ja.txt
-Name: "pl"; MessagesFile: "Translations\pl.isl"; LicenseFile: ..\gpl-pl.txt
-Name: "pt"; MessagesFile: "Translations\pt.isl"; LicenseFile: ..\gpl-pt.txt
-Name: "ru"; MessagesFile: "Translations\ru.isl"; LicenseFile: ..\gpl-ru.txt
+Name: "it"; MessagesFile: "Translations\it.isl"; LicenseFile: ..\license.txt
+Name: "ja"; MessagesFile: "Translations\ja.isl"; LicenseFile: ..\license.txt
+Name: "pl"; MessagesFile: "Translations\pl.isl"; LicenseFile: ..\license.txt
+Name: "pt"; MessagesFile: "Translations\pt.isl"; LicenseFile: ..\license.txt
+Name: "ru"; MessagesFile: "Translations\ru.isl"; LicenseFile: ..\license.txt
 
 [Components]
 Name: "main"; Description: "{cm:CmpMain,{#AvsName}}"; Types: full compact custom; Flags: fixed
@@ -77,14 +77,14 @@ Name: "main\avs64"; Description: "{#AvsName} (x64)"; Types: full compact custom;
 Name: "docs"; Description: "{cm:CmpDocs}";
 Name: "docs\enall"; Description: "{cm:CmpDocsEn}"; Types: full; Languages: not en
 Name: "docs\en"; Description: "{cm:CmpDocsEn}"; Types: full compact custom; Languages: en
-;Name: "docs\cs"; Description: "{cm:CmpDocsCs}"; Types: full compact custom; Languages: cs
-;Name: "docs\de"; Description: "{cm:CmpDocsDe}"; Types: full compact custom; Languages: de
-;Name: "docs\fr"; Description: "{cm:CmpDocsFr}"; Types: full compact custom; Languages: fr
-;Name: "docs\it"; Description: "{cm:CmpDocsIt}"; Types: full compact custom; Languages: it
-;Name: "docs\ja"; Description: "{cm:CmpDocsJa}"; Types: full compact custom; Languages: ja
-;Name: "docs\pl"; Description: "{cm:CmpDocsPl}"; Types: full compact custom; Languages: pl
-;Name: "docs\pt"; Description: "{cm:CmpDocsPt}"; Types: full compact custom; Languages: pt pt_br
-;Name: "docs\ru"; Description: "{cm:CmpDocsRu}"; Types: full compact custom; Languages: ru
+Name: "docs\cs"; Description: "{cm:CmpDocsCs}"; Types: full compact custom; Languages: cs
+Name: "docs\de"; Description: "{cm:CmpDocsDe}"; Types: full compact custom; Languages: de
+Name: "docs\fr"; Description: "{cm:CmpDocsFr}"; Types: full compact custom; Languages: fr
+Name: "docs\it"; Description: "{cm:CmpDocsIt}"; Types: full compact custom; Languages: it
+Name: "docs\ja"; Description: "{cm:CmpDocsJa}"; Types: full compact custom; Languages: ja
+Name: "docs\pl"; Description: "{cm:CmpDocsPl}"; Types: full compact custom; Languages: pl
+Name: "docs\pt"; Description: "{cm:CmpDocsPt}"; Types: full compact custom; Languages: pt pt_br
+Name: "docs\ru"; Description: "{cm:CmpDocsRu}"; Types: full compact custom; Languages: ru
 
 Name: "examples"; Description: "{cm:CmpDocsExamples}"; Types: full compact custom
 Name: "sdk"; Description: "{cm:CmpSdk,{#AvsName}}"; Types: full custom
@@ -112,17 +112,20 @@ Source: "{sys}\DevIL.dll"; DestDir:{code:GetAvsDirsLegacy|Prog}\PlusBackup\sys64
 Source: "{commonprograms}\AviSynth 2.5\*"; DestDir:{code:GetAvsDirsLegacy|Prog}\PlusBackup\StartMenu; Components: avsmig\backup; ExternalSize: 0; AfterInstall: WipeLegacyStartMenu; Flags: external onlyifdoesntexist skipifsourcedoesntexist uninsneveruninstall  
 
 Source: "..\gpl*.txt"; DestDir: "{app}\License"; Components: main; Flags: ignoreversion
-Source: "..\lgpl_for_used_libs.txt"; DestDir: "{app}\License"; Components: main; Flags: ignoreversion
+Source: "..\lgpl_for_used_libs.txt"; DestDir: "{app}\License"; Components: main; Flags: ignoreversion   
+Source: "..\license.txt"; DestDir: "{app}\License"; Components: main; Flags: ignoreversion  
 
 Source: "{#BuildDir32}\Output\AviSynth.dll"; DestDir:{sys}; Components: main\avs32; Flags: 32bit ignoreversion 
 Source: "{#BuildDir32}\Output\System\DevIL.dll"; DestDir:{sys}; Components: main\avs32; Flags: 32bit ignoreversion 
-Source: "{#BuildDir32}\Output\Plugins\*.dll"; DestDir:{code:GetAvsDirsPlus|PlugPlus32}; Components: main\avs32; Flags: ignoreversion 
+Source: "{#BuildDir32}\Output\Plugins\*.dll"; DestDir:{code:GetAvsDirsPlus|PlugPlus32}; Components: main\avs32; Flags: ignoreversion             
+Source: "{#BuildDir32}\Output\Plugins\*.exe"; DestDir:{code:GetAvsDirsPlus|PlugPlus32}; Components: main\avs32; Flags: ignoreversion 
 Source: "..\ColorPresets\*"; DestDir:{code:GetAvsDirsPlus|PlugPlus32}; Components: main\avs32; Flags: ignoreversion 
 Source: "..\Prerequisites\vcredist_x86.exe"; DestDir: {app}; Components: main\avs32; Flags: deleteafterinstall
 
 Source: "{#BuildDir64}\Output\AviSynth.dll"; DestDir:{sys}; Components: main\avs64; Flags: 64bit ignoreversion 
 Source: "{#BuildDir64}\Output\System\DevIL.dll"; DestDir:{sys}; Components: main\avs64; Flags: 64bit ignoreversion 
-Source: "{#BuildDir64}\Output\Plugins\*.dll"; DestDir:{code:GetAvsDirsPlus|PlugPlus64}; Components: main\avs64; Flags: ignoreversion 
+Source: "{#BuildDir64}\Output\Plugins\*.dll"; DestDir:{code:GetAvsDirsPlus|PlugPlus64}; Components: main\avs64; Flags: ignoreversion      
+Source: "{#BuildDir64}\Output\Plugins\*.exe"; DestDir:{code:GetAvsDirsPlus|PlugPlus64}; Components: main\avs64; Flags: ignoreversion 
 Source: "..\ColorPresets\*"; DestDir:{code:GetAvsDirsPlus|PlugPlus64}; Components: main\avs64; Flags: ignoreversion
 Source: "..\Prerequisites\vcredist_x64.exe"; DestDir: {app}; Components: main\avs64; Flags: deleteafterinstall
 
@@ -470,7 +473,7 @@ end;
 
 function InitializeSetup(): Boolean;
 begin
-  SetAvsDirsReg();
+  SetAvsDirsReg();     
   Result := True
 end;
 
@@ -485,7 +488,8 @@ begin
   WizardForm.WelcomePage.Color := $fcfcfc;
   WizardForm.ReadyMemo.ScrollBars:= ssVertical;
  
-  
+   
+  SetAvsDirsPlus();
 
   MigrationPage := CreateInputOptionPage(wpSelectDir, CustomMessage('MigPageCaption'), FmtMessage(CustomMessage('MigPageDescription'),['{#AvsName}']),
                    FmtMessage(CustomMessage('MigPageSubCaption'),['{#AvsName}',AvsDirsReg.Prog]), True, False)
