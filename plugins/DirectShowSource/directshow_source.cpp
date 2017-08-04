@@ -36,7 +36,7 @@
 #include "directshow_source.h"
 #include <avs/minmax.h>
 
-#define DSS_VERSION "2.6.0"
+#define DSS_VERSION "2.6.1"
 
 /************************************
  *          Logging Utility         *
@@ -51,15 +51,15 @@
 // We print a timestamp, the objects address, the message
 //
 #define dssRPT0(f, s)                 _RPT0(0, "DSS " s);                \
-      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08X 0x%08X " s, Tick(), f, this, GetCurrentThreadId())
+      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08p 0x%08X " s, Tick(), f, this, GetCurrentThreadId())
 #define dssRPT1(f, s, a1)             _RPT1(0, "DSS " s, a1);            \
-      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08X 0x%08X " s, Tick(), f, this, GetCurrentThreadId(), a1)
+      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08p 0x%08X " s, Tick(), f, this, GetCurrentThreadId(), a1)
 #define dssRPT2(f, s, a1, a2)         _RPT2(0, "DSS " s, a1, a2);        \
-      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08X 0x%08X " s, Tick(), f, this, GetCurrentThreadId(), a1, a2)
+      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08p 0x%08X " s, Tick(), f, this, GetCurrentThreadId(), a1, a2)
 #define dssRPT3(f, s, a1, a2, a3)     _RPT3(0, "DSS " s, a1, a2, a3);    \
-      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08X 0x%08X " s, Tick(), f, this, GetCurrentThreadId(), a1, a2, a3)
+      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08p 0x%08X " s, Tick(), f, this, GetCurrentThreadId(), a1, a2, a3)
 #define dssRPT4(f, s, a1, a2, a3, a4) _RPT4(0, "DSS " s, a1, a2, a3, a4);\
-      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08X 0x%08X " s, Tick(), f, this, GetCurrentThreadId(), a1, a2, a3, a4)
+      if (log && (f & log->mask)) fprintf(log->file, "%s %03x 0x%08p 0x%08X " s, Tick(), f, this, GetCurrentThreadId(), a1, a2, a3, a4)
 
 // Reporting masks
 enum {
@@ -99,6 +99,7 @@ char* Tick() {
   tick %= 99;
 
   _snprintf(buf, 15, "%02u:%02u:%02u.%03u", tick, min, sec, msec);
+  buf[15] = 0;
 
   return buf;
 }
@@ -108,7 +109,7 @@ LOG::LOG(const char* fn, int _mask, IScriptEnvironment* env) : mask(_mask), coun
   if (!file)
     env->ThrowError("DirectShowSource: Not able to open log file, '%s' for appending.", fn);
 
-  fprintf(file, "%s fff 0x00000000 DirectShowSource " DSS_VERSION " build:" __DATE__" [" __TIME__"]\n", Tick());
+  fprintf(file, "%s fff 0x00000000 DirectShowSource " DSS_VERSION " build:" __DATE__ " [" __TIME__ "]\n", Tick());
 }
 
 LOG::~LOG() {
@@ -310,7 +311,7 @@ GetSample::GetSample(bool _load_audio, bool _load_video, unsigned _media, LOG* _
       delete my_media_types[i];
 
     if (Allocator) {
-      dssRPT1(dssNEW, "Releasing Allocator %p.\n", Allocator);
+      dssRPT1(dssNEW, "Releasing Allocator 0x%08p.\n", Allocator);
       Allocator->Release();
       Allocator = 0;
     }
@@ -857,17 +858,17 @@ SeekExit:
   }
 
   HRESULT __stdcall GetSample::SetSyncSource(IReferenceClock* pClock) {
-    dssRPT2(dssCMD, "GetSample::SetSyncSource(0x%08x), was 0x%08x\n", pClock, pclock);
+    dssRPT2(dssCMD, "GetSample::SetSyncSource(0x%08p), was 0x%08p\n", pClock, pclock);
     pclock = pClock;
     return S_OK;
   }
 
   HRESULT __stdcall GetSample::GetSyncSource(IReferenceClock** ppClock) {
     if (!ppClock) {
-      dssRPT1(dssERROR, "GetSample::GetSyncSource() ** E_POINTER **, is 0x%08x\n", pclock);
+      dssRPT1(dssERROR, "GetSample::GetSyncSource() ** E_POINTER **, is 0x%08p\n", pclock);
       return E_POINTER;
     }
-    dssRPT1(dssCMD, "GetSample::GetSyncSource(), is 0x%08x\n", pclock);
+    dssRPT1(dssCMD, "GetSample::GetSyncSource(), is 0x%08p\n", pclock);
     *ppClock = pclock;
     if (pclock) pclock->AddRef();
     return S_OK;
@@ -896,7 +897,7 @@ SeekExit:
       return E_POINTER;
     }
 
-    if (lstrcmpW(L"GetSample01", Id)) {
+    if (wcscmp(L"GetSample01", Id)) {
       dssRPT1(dssERROR, "GetSample::FindPin(%ls, ppPin) ** VFW_E_NOT_FOUND **\n", Id);
       *ppPin = NULL;
       return VFW_E_NOT_FOUND;
@@ -917,14 +918,14 @@ SeekExit:
       return E_POINTER;
     }
     dssRPT0(dssCMD, "GetSample::QueryFilterInfo()\n");
-    lstrcpynW(pInfo->achName, L"GetSample", MAX_FILTER_NAME);
+    wcsncpy(pInfo->achName, L"GetSample", MAX_FILTER_NAME);
     pInfo->pGraph = filter_graph;
     if (filter_graph) filter_graph->AddRef();
     return S_OK;
   }
 
   HRESULT __stdcall GetSample::JoinFilterGraph(IFilterGraph* pGraph, LPCWSTR pName) {
-    dssRPT2(dssCMD, "GetSample::JoinFilterGraph(0x%08x, %ls)\n", pGraph, pName);
+    dssRPT2(dssCMD, "GetSample::JoinFilterGraph(0x%08p, %ls)\n", pGraph, pName);
     filter_graph = pGraph;
     return S_OK;
   }
@@ -965,7 +966,7 @@ SeekExit:
       return VFW_E_TYPE_NOT_ACCEPTED;
     }
 
-    dssRPT1(dssCMD, "GetSample::ReceiveConnection(0x%08x, pmt)\n", pConnector);
+    dssRPT1(dssCMD, "GetSample::ReceiveConnection(0x%08p, pmt)\n", pConnector);
     vi = tmp;
     source_pin = pConnector;
     if (am_media_type)
@@ -989,7 +990,7 @@ SeekExit:
     am_media_type = 0;
 
     if (Allocator) {
-      dssRPT1(dssNEW, "Releasing Allocator 0x%08x.\n", Allocator);
+      dssRPT1(dssNEW, "Releasing Allocator 0x%08p.\n", Allocator);
       Allocator->Release();
       Allocator = 0;
     }
@@ -1009,7 +1010,7 @@ SeekExit:
       return VFW_E_NOT_CONNECTED;
     }
     source_pin->AddRef();
-    dssRPT1(dssCMD, "GetSample::ConnectedTo() is 0x%08x\n", source_pin);
+    dssRPT1(dssCMD, "GetSample::ConnectedTo() is 0x%08p\n", source_pin);
     return S_OK;
   }
 
@@ -1037,8 +1038,8 @@ SeekExit:
     pInfo->pFilter = static_cast<IBaseFilter*>(this);
     AddRef();
     pInfo->dir = PINDIR_INPUT;
-    lstrcpynW(pInfo->achName, L"GetSample", MAX_PIN_NAME);
-    dssRPT1(dssCMD, "GetSample::QueryPinInfo() %p\n", this);
+    wcsncpy(pInfo->achName, L"GetSample", MAX_PIN_NAME);
+    dssRPT1(dssCMD, "GetSample::QueryPinInfo() 0x%08p\n", this);
     return S_OK;
   }
 
@@ -1158,7 +1159,7 @@ pbFormat:
         return S_FALSE;
       }
       if (pmt->cbFormat < sizeof(WAVEFORMATEX)) {
-        dssRPT2(dssNEG,  "*** Audio: AM_MEDIA_TYPE.cbFormat to small - %d of %d\n",
+        dssRPT2(dssNEG,  "*** Audio: AM_MEDIA_TYPE.cbFormat to small - %d of %zd\n",
                          pmt->cbFormat, sizeof(WAVEFORMATEX));
         return S_FALSE;
       }
@@ -1189,7 +1190,7 @@ pbFormat:
 
         if (wex->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
           if (pmt->cbFormat < sizeof(WAVEFORMATEXTENSIBLE)) {
-            dssRPT2(dssNEG,  "*** Audio: AM_MEDIA_TYPE.cbFormat to small - %d of %d\n",
+            dssRPT2(dssNEG,  "*** Audio: AM_MEDIA_TYPE.cbFormat to small - %d of %zd\n",
                              pmt->cbFormat, sizeof(WAVEFORMATEXTENSIBLE));
             return S_FALSE;
           }
@@ -1415,7 +1416,7 @@ pbFormat:
       IMediaEventSink* mes = NULL;
       try {
         if (SUCCEEDED(filter_graph->QueryInterface(&mes))) {
-          mes->Notify(EC_COMPLETE, (long)S_OK, (long)static_cast<IBaseFilter*>(this));
+          mes->Notify(EC_COMPLETE, (LONG_PTR)S_OK, (LONG_PTR)static_cast<IBaseFilter*>(this));
           mes->Release();
         }
       }
@@ -1464,14 +1465,14 @@ pbFormat:
       dssRPT0(dssCMD, "GetSample::GetAllocator() VFW_E_NO_ALLOCATOR\n");
       return VFW_E_NO_ALLOCATOR;
     }
-    dssRPT1(dssCMD, "GetSample::GetAllocator(0x%08x)\n", Allocator);
+    dssRPT1(dssCMD, "GetSample::GetAllocator(0x%08p)\n", Allocator);
     Allocator->AddRef();
     *ppAllocator = Allocator;
     return S_OK;
   }
 
   HRESULT __stdcall GetSample::NotifyAllocator(IMemAllocator* pAllocator, BOOL bReadOnly) {
-    dssRPT4(dssCMD, "GetSample::NotifyAllocator(0x%08x, %x) was 0x%08x (%s)\n", pAllocator, bReadOnly, Allocator, streamName);
+    dssRPT4(dssCMD, "GetSample::NotifyAllocator(0x%08p, %x) was 0x%08p (%s)\n", pAllocator, bReadOnly, Allocator, streamName);
     if (!pAllocator) {
       dssRPT0(dssCMD, "GetSample::NotifyAllocator() E_POINTER\n");
       return E_POINTER;
@@ -1804,7 +1805,7 @@ void DirectShowSource::SetMicrosoftDVtoFullResolution(IGraphBuilder* gb) {
   while (S_OK == ef->Next(1, &bf, &fetched)) {
     IIPDVDec* pDVDec;
     if (SUCCEEDED(bf->QueryInterface(&pDVDec))) {
-      dssRPT1(dssINFO, "DVtoFullResolution() pDVDec=%p\n", pDVDec);
+      dssRPT1(dssINFO, "DVtoFullResolution() pDVDec=0x%08p\n", pDVDec);
       pDVDec->put_IPDisplay(DVRESOLUTION_FULL); // DVDECODERRESOLUTION_720x480);   // yes, this includes 720x576
       pDVDec->Release();
     }
@@ -1839,7 +1840,7 @@ void DirectShowSource::DisableDeinterlacing(IFilterGraph *pGraph)
 
         hr = pFilter->QueryInterface(IID_IPropertyBag, (void**)&pPropertyBag);
         if(SUCCEEDED(hr)) {
-          dssRPT1(dssINFO, "DisableDeinterlacing() pPropertyBag=0x%08X\n", pPropertyBag);
+          dssRPT1(dssINFO, "DisableDeinterlacing() pPropertyBag=0x%08p\n", pPropertyBag);
           VARIANT myVar;
 
           VariantInit(&myVar);
@@ -1851,7 +1852,7 @@ void DirectShowSource::DisableDeinterlacing(IFilterGraph *pGraph)
           pPropertyBag->Release();
         }
         else {
-          dssRPT2(dssINFO, "DisableDeinterlacing() pFilter=0x%08X code=%X\n", pFilter, hr);
+          dssRPT2(dssINFO, "DisableDeinterlacing() pFilter=0x%08p code=%X\n", pFilter, hr);
         }
       }
       // The FILTER_INFO structure holds a pointer to the Filter Graph
@@ -1888,7 +1889,7 @@ void DirectShowSource::SetWMAudioDecoderDMOtoHiResOutput(IFilterGraph *pGraph)
 
         hr = pFilter->QueryInterface(IID_IPropertyBag, (void**)&pPropertyBag);
         if(SUCCEEDED(hr)) {
-          dssRPT1(dssINFO, "WMAudioDecoderDMOtoHiRes() pPropertyBag=0x%08X\n", pPropertyBag);
+          dssRPT1(dssINFO, "WMAudioDecoderDMOtoHiRes() pPropertyBag=0x%08p\n", pPropertyBag);
           VARIANT myVar;
 
           VariantInit(&myVar);
@@ -1920,7 +1921,7 @@ void DirectShowSource::SetWMAudioDecoderDMOtoHiResOutput(IFilterGraph *pGraph)
           }
         }
         else {
-          dssRPT2(dssINFO, "WMAudioDecoderDMOtoHiRes() pFilter=%p code=%X\n", pFilter, hr);
+          dssRPT2(dssINFO, "WMAudioDecoderDMOtoHiRes() pFilter=0x%08p code=%X\n", pFilter, hr);
         }
       }
       // The FILTER_INFO structure holds a pointer to the Filter Graph
@@ -2474,7 +2475,7 @@ DirectShowSource::DirectShowSource(const char* filename, int _avg_time_per_frame
 
           dssRPT2(dssCALL, "GetAudio: Memset %d offset, %d bytes.\n", bytes_filled, bytes_left);
           if (vi.sample_type == SAMPLE_FLOAT) {
-            float* samps = (float*)((int)(&samples[bytes_filled]) & ~3); // Aligned just to be sure
+            float* samps = (float*)(&samples[bytes_filled]); // Aligned just to be sure
             const int samples_left = (bytes_left+sizeof(float)-1)/sizeof(float);
             for (int i = 0; i < samples_left; i++)
               samps[i] = 0.0f;
@@ -2495,7 +2496,7 @@ void DirectShowSource::CheckHresult(IScriptEnvironment* env, HRESULT hr, const c
   if (SUCCEEDED(hr)) return;
 //  char buf[1024] = {0};
 //  if (!FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, hr, 0, buf, 1024, NULL))
-  char buf[MAX_ERROR_TEXT_LEN] = {0};
+  char buf[MAX_ERROR_TEXT_LEN+1] = {0};
   if (!AMGetErrorText(hr, buf, MAX_ERROR_TEXT_LEN))
     wsprintf(buf, "error code 0x%x", hr);
   env->ThrowError("DirectShowSource: %s%s:\n%s", msg, msg2, buf);
@@ -2551,10 +2552,7 @@ HRESULT DirectShowSource::LoadGraphFile(IGraphBuilder *pGraph, const WCHAR* wszN
 
 AVSValue __cdecl Create_DirectShowSource(AVSValue args, void*, IScriptEnvironment* env) {
 
-  if (args[0].ArraySize() != 1)
-    env->ThrowError("DirectShowSource: Only 1 filename currently supported!");
-
-  const char* filename = args[0][0].AsString();
+  const char* filename = args[0].AsString();
   const int _avg_time_per_frame = args[1].Defined() ? int(10000000 / args[1].AsFloat() + 0.5) : 0;
 
   const bool audio    = args[3].AsBool(true);
@@ -2597,8 +2595,8 @@ AVSValue __cdecl Create_DirectShowSource(AVSValue args, void*, IScriptEnvironmen
     else if (!lstrcmpi(pixel_type, "FULL"))  { _media = GetSample::mediaFULL; }
     else {
       env->ThrowError("DirectShowSource: pixel_type must be \"RGB24\", \"RGB32\", \"ARGB\", "
-                      "\"YUY2\", \"YV12\", \"YV16\", \"YV24\", \"AYUV\", \"Y41P\", \"Y411\", "
-                      "\"NV12\", \"RGB\", \"YUV\" , \"YUVex\", \"AUTO\"  or \"FULL\"");
+                      "\"YUY2\", \"YV12\", \"I420\", \"YV16\", \"YV24\", \"AYUV\", \"Y41P\", "
+                      "\"Y411\", \"NV12\", \"RGB\", \"YUV\" , \"YUVex\", \"AUTO\"  or \"FULL\"");
     }
     if (mediaPad) _media |= GetSample::mediaPAD;
   }
@@ -2690,16 +2688,10 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
 
   env->AddFunction("DirectShowSource",
 // args   0      1      2       3       4            5          6
-       "s+[fps]f[seek]b[audio]b[video]b[convertfps]b[seekzero]b"
+       "s[fps]f[seek]b[audio]b[video]b[convertfps]b[seekzero]b"
 //                 7            8            9        10        11
        "[timeout]i[pixel_type]s[framecount]i[logfile]s[logmask]i",
        Create_DirectShowSource, 0);
-
-  if (env->FunctionExists("SetFilterMTMode"))
-  {
-      IScriptEnvironment2 *env2 = static_cast<IScriptEnvironment2*>(env);
-      env2->SetFilterMTMode("DirectShowSource", MtMode::MT_SERIALIZED, true);
-  }
 
   return "DirectShowSource";
 }

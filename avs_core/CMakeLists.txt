@@ -8,6 +8,23 @@ Include("Files.cmake")
 add_library("AvsCore" SHARED ${AvsCore_Sources})
 set_target_properties("AvsCore" PROPERTIES "OUTPUT_NAME" "AviSynth")
 
+# Automatically group source files according to directory structure
+foreach(FILE ${AvsCore_Sources}) 
+  get_filename_component(PARENT_DIR "${FILE}" PATH)
+
+  string(REGEX REPLACE "(\\./)" "" GROUP "${PARENT_DIR}")
+  string(REPLACE "/" "\\" GROUP "${GROUP}")
+
+  # group into "Source Files" and "Header Files"
+  if ("${FILE}" MATCHES ".*\\.cpp")
+    set(GROUP "Source Files\\${GROUP}")
+  elseif("${FILE}" MATCHES ".*\\.h")
+    set(GROUP "Header Files\\${GROUP}")
+  endif()
+
+  source_group("${GROUP}" FILES "${FILE}")
+endforeach()
+
 # Specify include directories
 target_include_directories("AvsCore" PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Specify preprocessor definitions
@@ -15,6 +32,9 @@ target_compile_definitions("AvsCore" PRIVATE BUILDING_AVSCORE)
 
 # Windows DLL dependencies 
 target_link_libraries("AvsCore" "Winmm.lib" "Vfw32.lib" "Msacm32.lib" "Gdi32.lib" "User32.lib" "Advapi32.lib" "Ole32.lib")
+if (NOT MSVC_IDE)
+  target_link_libraries("AvsCore" "libuuid.lib")
+endif()
 
 if (MSVC_IDE)    
   # Copy output to a common folder for easy deployment

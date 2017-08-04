@@ -42,6 +42,9 @@
 #include <ctime>
 #include <cmath>
 #include <new>
+#include <cassert>
+#include <stdint.h>
+#include <algorithm>
 
 /********************************************************************
 ********************************************************************/
@@ -65,7 +68,18 @@ public:
   }
   const VideoInfo& __stdcall GetVideoInfo() { return vi; }
   bool __stdcall GetParity(int n) { return (vi.IsFieldBased() ? (n&1) : false) ^ parity; }
-  int __stdcall SetCacheHints(int cachehints,int frame_range) { return 0; };
+  int __stdcall SetCacheHints(int cachehints,int frame_range)
+  {
+    switch (cachehints)
+    {
+    case CACHE_DONT_CACHE_ME:
+      return 1;
+    case CACHE_GET_MTMODE:
+      return MT_NICE_FILTER;
+    default:
+      return 0;
+    }
+  };
 };
 
 
@@ -74,38 +88,76 @@ static PVideoFrame CreateBlankFrame(const VideoInfo& vi, int color, int mode, IS
   if (!vi.HasVideo()) return 0;
 
   PVideoFrame frame = env->NewVideoFrame(vi);
+
+  // RGB 8->16 bit: not << 8 like YUV but 0..255 -> 0..65535
+  auto rgbcolor8to16 = [](uint8_t color8) { return (uint16_t)color8 * 257; };
+
+  if (vi.IsPlanar()) {
+
+    int pixelsize = vi.ComponentSize();
+
+    int color_yuv = (mode == COLOR_MODE_YUV) ? color : RGB2YUV(color);
+
+    union {
+      uint32_t i;
+      float f;
+    } Cval;
+
+    bool isyuvlike = vi.IsYUV() || vi.IsYUVA();
+
+    int planes_y[4] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
+    int planes_r[4] = { PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A };
+    int *planes = isyuvlike ? planes_y : planes_r;
+
+    // color order: ARGB or AYUV
+    for (int p = 0; p < vi.NumComponents(); p++)
+    {
+      int plane = planes[p];
+      if (isyuvlike) {
+          switch(plane) {
+          case PLANAR_A: Cval.i = (color >> 24) & 0xff; break;
+          case PLANAR_Y: Cval.i = (color_yuv >> 16) & 0xff; break;
+          case PLANAR_U: Cval.i = (color_yuv >> 8) & 0xff; break;
+          case PLANAR_V: Cval.i = color_yuv & 0xff; break;
+          }
+      } else {
+          // planar RGB
+          switch(plane) {
+          case PLANAR_A: Cval.i = (color >> 24) & 0xff; break;
+          case PLANAR_R: Cval.i = (color >> 16) & 0xff; break;
+          case PLANAR_G: Cval.i = (color >> 8) & 0xff; break;
+          case PLANAR_B: Cval.i = color & 0xff; break;
+          }
+      }
+
+
+      BYTE *dstp = frame->GetWritePtr(plane);
+      int size = frame->GetPitch(plane) * frame->GetHeight(plane);
+
+      switch(pixelsize) {
+      case 1: Cval.i |= (Cval.i << 8) | (Cval.i << 16) | (Cval.i << 24); break; // 4 pixels at a time
+      case 2: Cval.i = (Cval.i << 8) | (Cval.i << 24); break; // 2 pixels at a time
+      default: // case 4:
+        Cval.f = float(Cval.i) / 256.0f; // 32 bit float 128=0.5
+      }
+
+      for (int i = 0; i < size; i += 4)
+        *(uint32_t*)(dstp + i) = Cval.i;
+    }
+    return frame;
+  }
+
   BYTE* p = frame->GetWritePtr();
   int size = frame->GetPitch() * frame->GetHeight();
 
-  if (vi.IsPlanar()) {
-    int color_yuv =(mode == COLOR_MODE_YUV) ? color : RGB2YUV(color);
-    int Cval = (color_yuv>>16)&0xff;
-    Cval |= (Cval<<8)|(Cval<<16)|(Cval<<24);
-    {for (int i=0; i<size; i+=4)
-      *(unsigned*)(p+i) = Cval;
-    }
-    p = frame->GetWritePtr(PLANAR_U);
-    size = frame->GetPitch(PLANAR_U) * frame->GetHeight(PLANAR_U);
-    Cval = (color_yuv>>8)&0xff;
-    Cval |= (Cval<<8)|(Cval<<16)|(Cval<<24);
-    {for (int i=0; i<size; i+=4)
-      *(unsigned*)(p+i) = Cval;
-    }
-    size = frame->GetPitch(PLANAR_V) * frame->GetHeight(PLANAR_V);
-    p = frame->GetWritePtr(PLANAR_V);
-    Cval = (color_yuv)&0xff;
-    Cval |= (Cval<<8)|(Cval<<16)|(Cval<<24);
-    {for (int i=0; i<size; i+=4)
-      *(unsigned*)(p+i) = Cval;
-    }
-  } else if (vi.IsYUY2()) {
+  if (vi.IsYUY2()) {
     int color_yuv =(mode == COLOR_MODE_YUV) ? color : RGB2YUV(color);
     unsigned d = ((color_yuv>>16)&255) * 0x010001 + ((color_yuv>>8)&255) * 0x0100 + (color_yuv&255) * 0x01000000;
     for (int i=0; i<size; i+=4)
       *(unsigned*)(p+i) = d;
   } else if (vi.IsRGB24()) {
-    const unsigned char clr0 = (color & 0xFF);
-    const unsigned short clr1 = (color >> 8);
+    const unsigned char clr0  = (unsigned char)(color & 0xFF);
+    const unsigned short clr1 = (unsigned short)(color >> 8);
     const int gr = frame->GetRowSize();
     const int gp = frame->GetPitch();
     for (int y=frame->GetHeight();y>0;y--) {
@@ -117,9 +169,98 @@ static PVideoFrame CreateBlankFrame(const VideoInfo& vi, int color, int mode, IS
   } else if (vi.IsRGB32()) {
     for (int i=0; i<size; i+=4)
       *(unsigned*)(p+i) = color;
+  } else if (vi.IsRGB48()) {
+      const uint16_t clr0  = rgbcolor8to16(color & 0xFF);
+      uint16_t r = rgbcolor8to16((color >> 16) & 0xFF);
+      uint16_t g = rgbcolor8to16((color >> 8 ) & 0xFF);
+      const uint32_t clr1 = (r << 16) + (g);
+      const int gr = frame->GetRowSize() / sizeof(uint16_t);
+      const int gp = frame->GetPitch() / sizeof(uint16_t);
+      uint16_t* p16 = reinterpret_cast<uint16_t*>(p);
+      for (int y=frame->GetHeight();y>0;y--) {
+          for (int i=0; i<gr; i+=3) {
+              p16[i] = clr0;   // b
+              *reinterpret_cast<uint32_t*>(p16+i+1) = clr1; // gr
+          }
+          p16 += gp;
+      }
+  } else if (vi.IsRGB64()) {
+      uint64_t r = rgbcolor8to16((color >> 16) & 0xFF);
+      uint64_t g = rgbcolor8to16((color >> 8 ) & 0xFF);
+      uint64_t b = rgbcolor8to16((color      ) & 0xFF);
+      uint64_t a = rgbcolor8to16((color >> 24) & 0xFF);
+      uint64_t color64 = (a << 48) + (r << 32) + (g << 16) + (b);
+      std::fill_n(reinterpret_cast<uint64_t*>(p), size / sizeof(uint64_t), color64);
   }
   return frame;
 }
+
+static int PixelTypeFromName(const char *pixel_type_string) {
+    if (!lstrcmpi(pixel_type_string, "YUY2")) return VideoInfo::CS_YUY2;
+    else if (!lstrcmpi(pixel_type_string, "YV12")) return VideoInfo::CS_YV12;
+    else if (!lstrcmpi(pixel_type_string, "YV24")) return VideoInfo::CS_YV24;
+    else if (!lstrcmpi(pixel_type_string, "YV16")) return VideoInfo::CS_YV16;
+    else if (!lstrcmpi(pixel_type_string, "Y8"))   return VideoInfo::CS_Y8;
+    else if (!lstrcmpi(pixel_type_string, "YV411")) return VideoInfo::CS_YV411;
+    else if (!lstrcmpi(pixel_type_string, "RGB24")) return VideoInfo::CS_BGR24;
+    else if (!lstrcmpi(pixel_type_string, "RGB32")) return VideoInfo::CS_BGR32;
+    else if (!lstrcmpi(pixel_type_string, "YUV420P10")) return VideoInfo::CS_YUV420P10;
+    else if (!lstrcmpi(pixel_type_string, "YUV422P10")) return VideoInfo::CS_YUV422P10;
+    else if (!lstrcmpi(pixel_type_string, "YUV444P10")) return VideoInfo::CS_YUV444P10;
+    else if (!lstrcmpi(pixel_type_string, "Y10")) return VideoInfo::CS_Y10;
+    else if (!lstrcmpi(pixel_type_string, "YUV420P12")) return VideoInfo::CS_YUV420P12;
+    else if (!lstrcmpi(pixel_type_string, "YUV422P12")) return VideoInfo::CS_YUV422P12;
+    else if (!lstrcmpi(pixel_type_string, "YUV444P12")) return VideoInfo::CS_YUV444P12;
+    else if (!lstrcmpi(pixel_type_string, "Y12")) return VideoInfo::CS_Y12;
+    else if (!lstrcmpi(pixel_type_string, "YUV420P14")) return VideoInfo::CS_YUV420P14;
+    else if (!lstrcmpi(pixel_type_string, "YUV422P14")) return VideoInfo::CS_YUV422P14;
+    else if (!lstrcmpi(pixel_type_string, "YUV444P14")) return VideoInfo::CS_YUV444P14;
+    else if (!lstrcmpi(pixel_type_string, "Y14")) return VideoInfo::CS_Y14;
+    else if (!lstrcmpi(pixel_type_string, "YUV420P16")) return VideoInfo::CS_YUV420P16;
+    else if (!lstrcmpi(pixel_type_string, "YUV422P16")) return VideoInfo::CS_YUV422P16;
+    else if (!lstrcmpi(pixel_type_string, "YUV444P16")) return VideoInfo::CS_YUV444P16;
+    else if (!lstrcmpi(pixel_type_string, "Y16")) return VideoInfo::CS_Y16;
+    else if (!lstrcmpi(pixel_type_string, "YUV420PS")) return VideoInfo::CS_YUV420PS;
+    else if (!lstrcmpi(pixel_type_string, "YUV422PS")) return VideoInfo::CS_YUV422PS;
+    else if (!lstrcmpi(pixel_type_string, "YUV444PS")) return VideoInfo::CS_YUV444PS;
+    else if (!lstrcmpi(pixel_type_string, "Y32")) return VideoInfo::CS_Y32;
+    else if (!lstrcmpi(pixel_type_string, "RGB48")) return VideoInfo::CS_BGR48;
+    else if (!lstrcmpi(pixel_type_string, "RGB64")) return VideoInfo::CS_BGR64;
+    else if (!lstrcmpi(pixel_type_string, "RGBP")) return VideoInfo::CS_RGBP;
+    else if (!lstrcmpi(pixel_type_string, "RGBP10")) return VideoInfo::CS_RGBP10;
+    else if (!lstrcmpi(pixel_type_string, "RGBP12")) return VideoInfo::CS_RGBP12;
+    else if (!lstrcmpi(pixel_type_string, "RGBP14")) return VideoInfo::CS_RGBP14;
+    else if (!lstrcmpi(pixel_type_string, "RGBP16")) return VideoInfo::CS_RGBP16;
+    else if (!lstrcmpi(pixel_type_string, "RGBPS")) return VideoInfo::CS_RGBPS;
+    else if (!lstrcmpi(pixel_type_string, "RGBAP")) return VideoInfo::CS_RGBAP;
+    else if (!lstrcmpi(pixel_type_string, "RGBAP10")) return VideoInfo::CS_RGBAP10;
+    else if (!lstrcmpi(pixel_type_string, "RGBAP12")) return VideoInfo::CS_RGBAP12;
+    else if (!lstrcmpi(pixel_type_string, "RGBAP14")) return VideoInfo::CS_RGBAP14;
+    else if (!lstrcmpi(pixel_type_string, "RGBAP16")) return VideoInfo::CS_RGBAP16;
+    else if (!lstrcmpi(pixel_type_string, "RGBAPS")) return VideoInfo::CS_RGBAPS;
+    else if (!lstrcmpi(pixel_type_string, "YUVA420")) return VideoInfo::CS_YUVA420;
+    else if (!lstrcmpi(pixel_type_string, "YUVA420P10")) return VideoInfo::CS_YUVA420P10;
+    else if (!lstrcmpi(pixel_type_string, "YUVA420P12")) return VideoInfo::CS_YUVA420P12;
+    else if (!lstrcmpi(pixel_type_string, "YUVA420P14")) return VideoInfo::CS_YUVA420P14;
+    else if (!lstrcmpi(pixel_type_string, "YUVA420P16")) return VideoInfo::CS_YUVA420P16;
+    else if (!lstrcmpi(pixel_type_string, "YUVA420PS")) return VideoInfo::CS_YUVA420PS;
+    else if (!lstrcmpi(pixel_type_string, "YUVA422")) return VideoInfo::CS_YUVA422;
+    else if (!lstrcmpi(pixel_type_string, "YUVA422P10")) return VideoInfo::CS_YUVA422P10;
+    else if (!lstrcmpi(pixel_type_string, "YUVA422P12")) return VideoInfo::CS_YUVA422P12;
+    else if (!lstrcmpi(pixel_type_string, "YUVA422P14")) return VideoInfo::CS_YUVA422P14;
+    else if (!lstrcmpi(pixel_type_string, "YUVA422P16")) return VideoInfo::CS_YUVA422P16;
+    else if (!lstrcmpi(pixel_type_string, "YUVA422PS")) return VideoInfo::CS_YUVA422PS;
+    else if (!lstrcmpi(pixel_type_string, "YUVA444")) return VideoInfo::CS_YUVA444;
+    else if (!lstrcmpi(pixel_type_string, "YUVA444P10")) return VideoInfo::CS_YUVA444P10;
+    else if (!lstrcmpi(pixel_type_string, "YUVA444P12")) return VideoInfo::CS_YUVA444P12;
+    else if (!lstrcmpi(pixel_type_string, "YUVA444P14")) return VideoInfo::CS_YUVA444P14;
+    else if (!lstrcmpi(pixel_type_string, "YUVA444P16")) return VideoInfo::CS_YUVA444P16;
+    else if (!lstrcmpi(pixel_type_string, "YUVA444PS")) return VideoInfo::CS_YUVA444PS;
+    else {
+        return VideoInfo::CS_UNKNOWN;
+    }
+}
+
 
 static AVSValue __cdecl Create_BlankClip(AVSValue args, void*, IScriptEnvironment* env) {
   VideoInfo vi_default;
@@ -184,26 +325,15 @@ static AVSValue __cdecl Create_BlankClip(AVSValue args, void*, IScriptEnvironmen
   vi.height = args[3].AsInt(vi_default.height);
 
   if (args[4].Defined()) {
-    const char* pixel_type_string = args[4].AsString();
-    if (!lstrcmpi(pixel_type_string, "YUY2")) {
-      vi.pixel_type = VideoInfo::CS_YUY2;
-    } else if (!lstrcmpi(pixel_type_string, "YV12")) {
-      vi.pixel_type = VideoInfo::CS_YV12;
-    } else if (!lstrcmpi(pixel_type_string, "YV24")) {
-      vi.pixel_type = VideoInfo::CS_YV24;
-    } else if (!lstrcmpi(pixel_type_string, "YV16")) {
-      vi.pixel_type = VideoInfo::CS_YV16;
-    } else if (!lstrcmpi(pixel_type_string, "Y8")) {
-      vi.pixel_type = VideoInfo::CS_Y8;
-    } else if (!lstrcmpi(pixel_type_string, "YV411")) {
-      vi.pixel_type = VideoInfo::CS_YV411;
-    } else if (!lstrcmpi(pixel_type_string, "RGB24")) {
-      vi.pixel_type = VideoInfo::CS_BGR24;
-    } else if (!lstrcmpi(pixel_type_string, "RGB32")) {
-      vi.pixel_type = VideoInfo::CS_BGR32;
-    } else {
-      env->ThrowError("BlankClip: pixel_type must be \"RGB32\", \"RGB24\", \"YV12\", \"YV24\", \"YV16\", \"Y8\", \"YV411\" or \"YUY2\"");
-    }
+      int pixel_type = PixelTypeFromName(args[4].AsString());
+      if(pixel_type == VideoInfo::CS_UNKNOWN)
+      {
+          env->ThrowError("BlankClip: pixel_type must be \"RGB32\", \"RGB24\", \"YV12\", \"YV24\", \"YV16\", \"Y8\", \n"\
+              "\"YUV420P?\",\"YUV422P?\",\"YUV444P?\",\"Y?\",\n"\
+              "\"RGB48\",\"RGB64\",\"RGBP\",\"RGBP?\",\n"\
+              "\"YV411\" or \"YUY2\"");
+      }
+      vi.pixel_type = pixel_type;
   }
   else {
     vi.pixel_type = vi_default.pixel_type;
@@ -257,7 +387,7 @@ static AVSValue __cdecl Create_BlankClip(AVSValue args, void*, IScriptEnvironmen
   // If we got an Audio only default clip make the default duration the same
   if (!defHasVideo && defHasAudio) {
     const __int64 denom = Int32x32To64(vi.fps_denominator, vi_default.audio_samples_per_second);
-    vi_default.num_frames = (int)((vi_default.num_audio_samples * vi.fps_numerator + denom - 1) / denom); // ceiling
+    vi_default.num_frames = int((vi_default.num_audio_samples * vi.fps_numerator + denom - 1) / denom); // ceiling
   }
 
   vi.num_frames = args[1].AsInt(vi_default.num_frames);
@@ -271,11 +401,11 @@ static AVSValue __cdecl Create_BlankClip(AVSValue args, void*, IScriptEnvironmen
   if (args[11].Defined()) {
     if (color != 0) // Not quite 100% test
       env->ThrowError("BlankClip: color and color_yuv are mutually exclusive");
-    if (!vi.IsYUV())
+    if (!vi.IsYUV() && !vi.IsYUVA())
       env->ThrowError("BlankClip: color_yuv only valid for YUV color spaces");
     color = args[11].AsInt();
     mode=COLOR_MODE_YUV;
-    if ((unsigned)color > 0xffffff)
+    if (!vi.IsYUVA() && (unsigned)color > 0xffffff)
       env->ThrowError("BlankClip: color_yuv must be between 0 and %d($ffffff)", 0xffffff);
   }
 
@@ -341,6 +471,7 @@ class ColorBars : public IClip {
   PVideoFrame frame;
   SFLOAT *audio;
   unsigned nsamples;
+  bool staticframes; // P.F. false: a bit better for synthetic tests. Still defaults to true (one static frame is served)
 
   enum { Hz = 440 } ;
 
@@ -350,33 +481,36 @@ public:
     delete audio;
   }
 
-  ColorBars(int w, int h, const char* pixel_type, int type, IScriptEnvironment* env) {
+  ColorBars(int w, int h, const char* pixel_type, bool _staticframes, int type, IScriptEnvironment* env) {
     memset(&vi, 0, sizeof(VideoInfo));
+    staticframes = _staticframes; // P.F.
     vi.width = w;
     vi.height = h;
     vi.fps_numerator = 30000;
     vi.fps_denominator = 1001;
     vi.num_frames = 107892;   // 1 hour
+    int i_pixel_type = PixelTypeFromName(pixel_type);
+
     if (type) { // ColorbarsHD
-        if (lstrcmpi(pixel_type, "YV24") != 0)
+        if (i_pixel_type != VideoInfo::CS_YV24)
           env->ThrowError("ColorBarsHD: pixel_type must be \"YV24\"");
 
         vi.pixel_type = VideoInfo::CS_YV24;
     }
-    else if (lstrcmpi(pixel_type, "RGB32") == 0) {
+    else if (i_pixel_type == VideoInfo::CS_BGR32) {
         vi.pixel_type = VideoInfo::CS_BGR32;
     }
-    else if (lstrcmpi(pixel_type, "YUY2") == 0) { // YUY2
+    else if (i_pixel_type == VideoInfo::CS_YUY2) { // YUY2
         vi.pixel_type = VideoInfo::CS_YUY2;
         if (w & 1)
           env->ThrowError("ColorBars: YUY2 width must be even!");
     }
-    else if (lstrcmpi(pixel_type, "YV12") == 0) { // YV12
+    else if (i_pixel_type == VideoInfo::CS_YV12) { // YV12
         vi.pixel_type = VideoInfo::CS_YV12;
         if ((w & 1) || (h & 1))
         env->ThrowError("ColorBars: YV12 both height and width must be even!");
     }
-    else if (lstrcmpi(pixel_type, "YV24") == 0) { // YV24
+    else if (i_pixel_type == VideoInfo::CS_YV24) { // YV24
         vi.pixel_type = VideoInfo::CS_YV24;
     }
     else {
@@ -392,7 +526,7 @@ public:
     const int pitch = frame->GetPitch()/4;
 
     int y = 0;
-    
+
 	// HD colorbars arib_std_b28
 	// Rec709 yuv values calculated by jmac698, Jan 2010, for Midzuki
 	if (type) { // ColorbarsHD
@@ -479,7 +613,7 @@ public:
 				pV[x] = pattern23V[2];
 			}
 			for (int j=0; j < c*7; ++j, ++x) { // Y-Ramp
-				pY[x] = 16 + (220*j)/(c*7);
+				pY[x] = BYTE(16 + (220*j)/(c*7));
 				pU[x] = 128;
 				pV[x] = 128;
 			}
@@ -599,7 +733,7 @@ public:
 				p[x] = bottom_quarter[7];
 			p += pitch;
 		}
-		
+
 		static const int two_thirds_to_three_quarters[] =
 // RGB[16..235]   Blue     Black  Magenta      Black      Cyan     Black    LtGrey
 			{ 0x1010b4, 0x101010, 0xb410b4, 0x101010, 0x10b4b4, 0x101010, 0xb4b4b4 };
@@ -611,7 +745,7 @@ public:
 			}
 			p += pitch;
 		}
-		
+
 		static const int top_two_thirds[] =
 // RGB[16..235] LtGrey    Yellow      Cyan     Green   Magenta       Red      Blue
 			{ 0xb4b4b4, 0xb4b410, 0x10b4b4, 0x10b410, 0xb410b4, 0xb41010, 0x1010b4 };
@@ -625,7 +759,7 @@ public:
 		}
 	}
 	else if (vi.IsYUY2()) {
-		static const int top_two_thirds[] =
+		static const unsigned int top_two_thirds[] =
 //                LtGrey      Yellow        Cyan       Green     Magenta         Red        Blue
 			{ 0x80b480b4, 0x8ea22ca2, 0x2c839c83, 0x3a704870, 0xc654b854, 0xd4416441, 0x7223d423 }; //VYUY
 		w >>= 1;
@@ -638,7 +772,7 @@ public:
 			p += pitch;
 		}
 
-		static const int two_thirds_to_three_quarters[] =
+		static const unsigned  int two_thirds_to_three_quarters[] =
 //                 Blue        Black     Magenta       Black        Cyan       Black      LtGrey
 			{ 0x7223d423, 0x80108010, 0xc654b854, 0x80108010, 0x2c839c83, 0x80108010, 0x80b480b4 }; //VYUY
 		for (; y*4 < h*3; ++y) {
@@ -650,7 +784,7 @@ public:
 			p += pitch;
 		}
 
-		static const int bottom_quarter[] =
+		static const unsigned int bottom_quarter[] =
 //                    -I       white          +Q       Black       -4ire       Black       +4ire       Black
 			{ 0x5f109e10, 0x80eb80eb, 0x9510ae10, 0x80108010, 0x80078007, 0x80108010, 0x80198019, 0x80108010 }; //VYUY
 		for (; y < h; ++y) {
@@ -755,10 +889,42 @@ public:
 	}
   }
 
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) { return frame; }
+  // By the new "staticframes" parameter: colorbars we generate (copy) real new frames instead of a ready-to-use static one
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+  {
+    _RPT1(0, "ColorBars::GetFrame %d\n", n); // P.F.
+    if (staticframes) // P.F.
+      return frame; // original default method returns precomputed static frame.
+    else {
+      PVideoFrame result = env->NewVideoFrame(vi);
+      _RPT3(0, "ColorBars GetFrame origframe=%p vfb=%p newframe=%p\n", (void *)frame, (void *)result->GetFrameBuffer(), (void *)result); // P.F.
+      env->BitBlt(result->GetWritePtr(), result->GetPitch(), frame->GetReadPtr(), frame->GetPitch(), frame->GetRowSize(), frame->GetHeight());
+      env->BitBlt(result->GetWritePtr(PLANAR_V), result->GetPitch(PLANAR_V), frame->GetReadPtr(PLANAR_V), frame->GetPitch(PLANAR_V), frame->GetRowSize(PLANAR_V), frame->GetHeight(PLANAR_V));
+      env->BitBlt(result->GetWritePtr(PLANAR_U), result->GetPitch(PLANAR_U), frame->GetReadPtr(PLANAR_U), frame->GetPitch(PLANAR_U), frame->GetRowSize(PLANAR_U), frame->GetHeight(PLANAR_U));
+      return result;
+/*
+      PVideoFrame newframe = AdjustFrameAlignment(frame, vi, env); // P.F.
+      return newframe; // Forcing to create new frame to avoid the excessive SubFrame referencing.
+                       // Perhaps a bit more real-life for synthetic tests
+      */
+    }
+    //return frame;
+  }
+
   bool __stdcall GetParity(int n) { return false; }
   const VideoInfo& __stdcall GetVideoInfo() { return vi; }
-  int __stdcall SetCacheHints(int cachehints,int frame_range) { return 0; };
+  int __stdcall SetCacheHints(int cachehints,int frame_range)
+  {
+      switch (cachehints)
+      {
+      case CACHE_GET_MTMODE:
+          return MT_NICE_FILTER;
+      case CACHE_DONT_CACHE_ME:
+          return 1;
+      default:
+          return 0;
+      }
+  };
 
   void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) {
 #if 1
@@ -779,8 +945,8 @@ public:
     __int64 Hz=440;
     // Calculate what start equates in cycles.
     // This is the number of cycles (rounded down) that has already been taken.
-    __int64 startcycle = (start*Hz) /  vi.audio_samples_per_second;  
-    
+    __int64 startcycle = (start*Hz) /  vi.audio_samples_per_second;
+
     // Move offset down - this is to avoid float rounding errors
     int start_offset = (int)(start - ((startcycle * vi.audio_samples_per_second) / Hz));
 
@@ -802,11 +968,13 @@ public:
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* _type, IScriptEnvironment* env) {
-    const int type = (int)_type;
+    const int type = (int)(size_t)_type;
 
     return new ColorBars(args[0].AsInt(   type ? 1288 : 640),
                          args[1].AsInt(   type ?  720 : 480),
-                         args[2].AsString(type ? "YV24" : "RGB32"), type, env);
+                         args[2].AsString(type ? "YV24" : "RGB32"),
+                         args[3].AsBool(true), // new staticframes parameter
+                         type, env);
   }
 };
 
@@ -868,7 +1036,7 @@ AVSValue __cdecl Create_SegmentedSource(AVSValue args, void* use_directshow, ISc
     if (extension)
       *extension++ = 0;
     else
-      extension = "";
+      extension[0] = 0;
     for (int j = 0; j < 100; ++j) {
       char filename[260];
       wsprintf(filename, "%s.%02d.%s", basename, j, extension);
@@ -879,7 +1047,7 @@ AVSValue __cdecl Create_SegmentedSource(AVSValue args, void* use_directshow, ISc
             inv_args[0] = filename;
             clip = env->Invoke("DirectShowSource",AVSValue(inv_args, inv_args_count)).AsClip();
           } else {
-            clip =  (IClip*)(new AVISource(filename, bAudio, pixel_type, fourCC, 0, vtrack, atrack, env));
+            clip =  (IClip*)(new AVISource(filename, bAudio, pixel_type, fourCC, vtrack, atrack, AVISource::MODE_NORMAL, env));
           }
           result = !result ? clip : new_Splice(result, clip, false, env);
         } catch (const AvisynthError &e) {
@@ -1018,7 +1186,7 @@ public:
   static AVSValue __cdecl Create(AVSValue args, void*, IScriptEnvironment* env)
   {
 	  return new Tone(args[0].AsFloat(10.0f), args[1].AsFloat(440.0f), args[2].AsInt(48000),
-		              args[3].AsInt(2), args[4].AsString("Sine"), (float)args[5].AsFloat(1.0f), env);
+          args[3].AsInt(2), args[4].AsString("Sine"), args[5].AsFloatf(1.0f), env);
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) { return NULL; }
@@ -1040,7 +1208,7 @@ extern const AVSFunction Source_filters[] = {
   { "WAVSource",     BUILTIN_FUNC_PREFIX, "s+", AVISource::Create, (void*) AVISource::MODE_WAV },
   { "OpenDMLSource", BUILTIN_FUNC_PREFIX, "s+[audio]b[pixel_type]s[fourCC]s[vtrack]i[atrack]i", AVISource::Create, (void*) AVISource::MODE_OPENDML },
   { "SegmentedAVISource", BUILTIN_FUNC_PREFIX, "s+[audio]b[pixel_type]s[fourCC]s[vtrack]i[atrack]i", Create_SegmentedSource, (void*)0 },
-  { "SegmentedDirectShowSource", BUILTIN_FUNC_PREFIX, 
+  { "SegmentedDirectShowSource", BUILTIN_FUNC_PREFIX,
 // args               0      1      2       3       4            5          6         7            8
                      "s+[fps]f[seek]b[audio]b[video]b[convertfps]b[seekzero]b[timeout]i[pixel_type]s",
                      Create_SegmentedSource, (void*)1 },
@@ -1050,8 +1218,8 @@ extern const AVSFunction Source_filters[] = {
   { "Blackness", BUILTIN_FUNC_PREFIX, "[]c*[length]i[width]i[height]i[pixel_type]s[fps]f[fps_denominator]i[audio_rate]i[stereo]b[sixteen_bit]b[color]i[color_yuv]i[clip]c", Create_BlankClip },
   { "Blackness", BUILTIN_FUNC_PREFIX, "[]c*[length]i[width]i[height]i[pixel_type]s[fps]f[fps_denominator]i[audio_rate]i[channels]i[sample_type]s[color]i[color_yuv]i[clip]c", Create_BlankClip },
   { "MessageClip", BUILTIN_FUNC_PREFIX, "s[width]i[height]i[shrink]b[text_color]i[halo_color]i[bg_color]i", Create_MessageClip },
-  { "ColorBars", BUILTIN_FUNC_PREFIX, "[width]i[height]i[pixel_type]s", ColorBars::Create, (void*)0 },
-  { "ColorBarsHD", BUILTIN_FUNC_PREFIX, "[width]i[height]i[pixel_type]s", ColorBars::Create, (void*)1 },
+  { "ColorBars", BUILTIN_FUNC_PREFIX, "[width]i[height]i[pixel_type]s[staticframes]b", ColorBars::Create, (void*)0 },
+  { "ColorBarsHD", BUILTIN_FUNC_PREFIX, "[width]i[height]i[pixel_type]s[staticframes]b", ColorBars::Create, (void*)1 },
   { "Tone", BUILTIN_FUNC_PREFIX, "[length]f[frequency]f[samplerate]i[channels]i[type]s[level]f", Tone::Create },
 
   { "Version", BUILTIN_FUNC_PREFIX, "", Create_Version },

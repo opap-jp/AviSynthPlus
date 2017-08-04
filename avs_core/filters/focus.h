@@ -52,7 +52,8 @@ public:
   }
 
 private:
-  const int amount;
+  const double amountd;
+  int half_amount;
 };
 
 
@@ -70,8 +71,8 @@ public:
   }
 
 private:
-  const int amount;
-
+  const double amountd;
+  int half_amount;
 };
 
 AVSValue __cdecl Create_Sharpen(AVSValue args, void*, IScriptEnvironment* env);
@@ -98,6 +99,7 @@ private:
 // YV12:
     int planes[8];
     int scenechange;
+    int pixelsize;
 
 // YUY2:
   const unsigned luma_threshold, chroma_threshold;

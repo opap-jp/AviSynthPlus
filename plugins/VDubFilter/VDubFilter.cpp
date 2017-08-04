@@ -38,11 +38,12 @@
 #include <cstdio>
 #include <new>
 
-typedef unsigned int    Pixel;    // this will break on 64-bit machines!
+typedef unsigned int    Pixel;
 typedef unsigned char   Pixel8;
-typedef int             PixCoord;
-typedef int             PixDim;
-typedef int             PixOffset;
+typedef int             PixCoord; // long in vbitmap.h
+typedef int             PixDim;   // long in vbitmap.h
+//typedef int             PixOffset; // P.F. 160421 this really broke on 64 bit machines
+typedef ptrdiff_t       PixOffset; // much better
 
 /********************************************************************
 * VirtualDub plugin support
@@ -67,8 +68,10 @@ typedef int             PixOffset;
 
 int GetCPUFlags();
 
+#define VDcall __cdecl
 
 class CScriptValue;
+class CScriptValueStringHelper; // char ** helper
 struct CScriptObject;
 
 
@@ -77,17 +80,17 @@ struct CScriptObject;
 
 class IScriptInterpreter {
 public:
-  virtual void Destroy()                    =0;
+  virtual void VDcall Destroy()                    =0;
 
-  virtual void SetRootHandler(void*, void*) =0;
+  virtual void VDcall SetRootHandler(void*, void*) =0;
 
-  virtual void ExecuteLine(char *s)             =0;
+  virtual void VDcall ExecuteLine(char *s)             =0;
 
-  virtual void ScriptError(int e)               =0;
-  virtual char* TranslateScriptError(void* cse)   =0;
-  virtual char** AllocTempString(int l)            =0;
+  virtual void VDcall ScriptError(int e)               =0;
+  virtual char* VDcall TranslateScriptError(void* cse)   =0;
+  virtual char** VDcall AllocTempString(long l)            =0;
 
-  virtual CScriptValue LookupObjectMember(CScriptObject *obj, void *, char *szIdent) = 0;
+  virtual CScriptValue VDcall LookupObjectMember(CScriptObject *obj, void *, char *szIdent) = 0;
 };
 
 
@@ -95,7 +98,7 @@ public:
 
 class FilterActivation;
 
-typedef void (*ScriptVoidFunctionPtr)(IScriptInterpreter *, FilterActivation *, CScriptValue *, int);
+typedef void (VDcall *ScriptVoidFunctionPtr)(IScriptInterpreter *, FilterActivation *, CScriptValue *, int);
 
 struct ScriptFunctionDef {
   ScriptVoidFunctionPtr func_ptr;
@@ -111,21 +114,36 @@ struct CScriptObject {
 
 class CScriptValue {
 public:
-  enum { T_VOID, T_INT, T_PINT, T_STR, T_ARRAY, T_OBJECT, T_FNAME, T_FUNCTION, T_VARLV } type;
+  enum { T_VOID, T_INT, T_PINT, T_STR, T_ARRAY, T_OBJECT, T_FNAME, T_FUNCTION, T_VARLV, T_LONG, T_DOUBLE} type;
   CScriptObject *thisPtr;
+  // see vdub: vdvideofilt.h
+  /* fails in x64 + vdub + neatvideo
   union {
     int i;
     char **s;
   } u;
-  void *lpVoid;
+  void *lpVoid; // in 64 bit, the union is already 8 bytes, this extra helper pointer/padder makes it too big
+  */
+  union {
+    int i;
+    char **s;
+    __int64 l; // in avs n/a
+    double d;  // new type from 160420
+  } u;
   CScriptValue()            { type = T_VOID; }
-  void operator=(int i)         { type = T_INT;     u.i = i; }
-  void operator=(char **s)        { type = T_STR;     u.s = s; }
+  void operator=(int i)     { type = T_INT;    u.i = i; }
+  void operator=(char **s)  { type = T_STR;    u.s = s; }
+  void operator=(__int64 l) { type = T_LONG;   u.l = l; } // not used, only integer exists in avs
+  void operator=(double d)  { type = T_DOUBLE; u.d = d; }
+};
+
+class CScriptValueStringHelper {
+public:
+  void *lpVoid; // char ** helper, introduced for x64, the CScriptValue union is already 8 bytes
 };
 
 
 //////////////////// from VBitmap.h ////////////////////
-
 
 class VBitmap {
 public:
@@ -156,33 +174,33 @@ public:
 
   //////
 
-  virtual VBitmap& init(void *data, PixDim w, PixDim h, int depth) throw();
-  virtual VBitmap& init(void *data, BITMAPINFOHEADER *) throw();
+  virtual VBitmap& VDcall init(void *data, PixDim w, PixDim h, int depth) throw();
+  virtual VBitmap& VDcall init(void *data, BITMAPINFOHEADER *) throw();
 
-  virtual void MakeBitmapHeader(BITMAPINFOHEADER *bih) const throw();
+  virtual void VDcall MakeBitmapHeader(BITMAPINFOHEADER *bih) const throw();
 
-  virtual void AlignTo4() throw();
-  virtual void AlignTo8() throw();
+  virtual void VDcall AlignTo4() throw();
+  virtual void VDcall AlignTo8() throw();
 
-  virtual void BitBlt(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy) const;
-  virtual void BitBltDither(PixCoord x2, PixCoord y2, const VBitmap *src, PixDim x1, PixDim y1, PixDim dx, PixDim dy, bool to565) const;
-  virtual void BitBlt565(PixCoord x2, PixCoord y2, const VBitmap *src, PixDim x1, PixDim y1, PixDim dx, PixDim dy) const;
+  virtual void VDcall BitBlt(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy) const;
+  virtual void VDcall BitBltDither(PixCoord x2, PixCoord y2, const VBitmap *src, PixDim x1, PixDim y1, PixDim dx, PixDim dy, bool to565) const;
+  virtual void VDcall BitBlt565(PixCoord x2, PixCoord y2, const VBitmap *src, PixDim x1, PixDim y1, PixDim dx, PixDim dy) const;
 
-  virtual bool BitBltXlat1(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, const Pixel8 *tbl) const;
-  virtual bool BitBltXlat3(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, const Pixel32 *tbl) const;
+  virtual bool VDcall BitBltXlat1(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, const Pixel8 *tbl) const;
+  virtual bool VDcall BitBltXlat3(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, const Pixel32 *tbl) const;
 
-  virtual bool StretchBltNearestFast(PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, const VBitmap *src, double x2, double y2, double dx1, double dy1) const;
+  virtual bool VDcall StretchBltNearestFast(PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, const VBitmap *src, double x2, double y2, double dx1, double dy1) const;
 
-  virtual bool StretchBltBilinearFast(PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, const VBitmap *src, double x2, double y2, double dx1, double dy1) const;
+  virtual bool VDcall StretchBltBilinearFast(PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, const VBitmap *src, double x2, double y2, double dx1, double dy1) const;
 
-  virtual bool RectFill(PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, Pixel32 c) const;
+  virtual bool VDcall RectFill(PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, Pixel32 c) const;
 
-  virtual bool Histogram(PixCoord x, PixCoord y, PixCoord dx, PixCoord dy, int *pHisto, int iHistoType) const;
+  virtual bool VDcall Histogram(PixCoord x, PixCoord y, PixCoord dx, PixCoord dy, long *pHisto, int iHistoType) const;
 
   //// NEW AS OF VIRTUALDUB V1.2B
 
-  virtual bool BitBltFromYUY2(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy) const;
-  virtual bool BitBltFromI420(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy) const;
+  virtual bool VDcall BitBltFromYUY2(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy) const;
+  virtual bool VDcall BitBltFromI420(PixCoord x2, PixCoord y2, const VBitmap *src, PixCoord x1, PixCoord y1, PixDim dx, PixDim dy) const;
 };
 
 
@@ -212,17 +230,17 @@ VBitmap& VBitmap::init(void *data, PixDim w, PixDim h, int depth) throw() {
 
 void VBitmap::MakeBitmapHeader(BITMAPINFOHEADER *bih) const throw() {
   bih->biSize       = sizeof(BITMAPINFOHEADER);
-  bih->biBitCount     = depth;
+  bih->biBitCount   = (WORD)depth;
   bih->biPlanes     = 1;
   bih->biCompression    = BI_RGB;
 
   if (pitch == ((w*bih->biBitCount + 31)/32) * 4)
     bih->biWidth    = w;
   else
-    bih->biWidth    = pitch*8 / depth;
+    bih->biWidth    = LONG(pitch*8 / depth);
 
   bih->biHeight     = h;
-  bih->biSizeImage    = pitch*h;
+  bih->biSizeImage    = DWORD(pitch*h);
   bih->biClrUsed      = 0;
   bih->biClrImportant   = 0;
   bih->biXPelsPerMeter  = 0;
@@ -263,36 +281,36 @@ enum {
 class VFBitmap;
 struct FilterFunctions;
 
-typedef int  (*FilterInitProc     )(FilterActivation *fa, const FilterFunctions *ff);
-typedef void (*FilterDeinitProc   )(FilterActivation *fa, const FilterFunctions *ff);
-typedef int  (*FilterRunProc      )(const FilterActivation *fa, const FilterFunctions *ff);
-typedef int (*FilterParamProc    )(FilterActivation *fa, const FilterFunctions *ff);
-typedef int  (*FilterConfigProc   )(FilterActivation *fa, const FilterFunctions *ff, HWND hWnd);
-typedef void (*FilterStringProc   )(const FilterActivation *fa, const FilterFunctions *ff, char *buf);
-typedef int  (*FilterStartProc    )(FilterActivation *fa, const FilterFunctions *ff);
-typedef int  (*FilterEndProc      )(FilterActivation *fa, const FilterFunctions *ff);
-typedef bool (*FilterScriptStrProc)(FilterActivation *fa, const FilterFunctions *, char *, int);
+typedef int  (VDcall *FilterInitProc     )(FilterActivation *fa, const FilterFunctions *ff);
+typedef void (VDcall *FilterDeinitProc   )(FilterActivation *fa, const FilterFunctions *ff);
+typedef int  (VDcall *FilterRunProc      )(const FilterActivation *fa, const FilterFunctions *ff);
+typedef long (VDcall *FilterParamProc    )(FilterActivation *fa, const FilterFunctions *ff);
+typedef int  (VDcall *FilterConfigProc   )(FilterActivation *fa, const FilterFunctions *ff, HWND hWnd);
+typedef void (VDcall *FilterStringProc   )(const FilterActivation *fa, const FilterFunctions *ff, char *buf);
+typedef int  (VDcall *FilterStartProc    )(FilterActivation *fa, const FilterFunctions *ff);
+typedef int  (VDcall *FilterEndProc      )(FilterActivation *fa, const FilterFunctions *ff);
+typedef bool (VDcall *FilterScriptStrProc)(FilterActivation *fa, const FilterFunctions *, char *, int);
 
-typedef int (__cdecl *FilterModuleInitProc)(struct FilterModule *fm, const FilterFunctions *ff, int& vdfd_ver, int& vdfd_compat);
-typedef void (__cdecl *FilterModuleDeinitProc)(struct FilterModule *fm, const FilterFunctions *ff);
+typedef int  (VDcall *FilterModuleInitProc)(struct FilterModule *fm, const FilterFunctions *ff, int& vdfd_ver, int& vdfd_compat);
+typedef void (VDcall *FilterModuleDeinitProc)(struct FilterModule *fm, const FilterFunctions *ff);
 
 //////////
 
 class IFilterPreview {
 public:
-  virtual void SetButtonCallback(void*, void*)=0;
-  virtual void SetSampleCallback(void*, void*)=0;
+  virtual void VDcall SetButtonCallback(void*, void*)=0;
+  virtual void VDcall SetSampleCallback(void*, void*)=0;
 
-  virtual bool isPreviewEnabled()=0;
-  virtual void Toggle(HWND)=0;
-  virtual void Display(HWND, bool)=0;
-  virtual void RedoFrame()=0;
-  virtual void RedoSystem()=0;
-  virtual void UndoSystem()=0;
-  virtual void InitButton(HWND)=0;
-  virtual void Close()=0;
-  virtual bool SampleCurrentFrame()=0;
-  virtual int SampleFrames()=0;
+  virtual bool VDcall isPreviewEnabled()=0;
+  virtual void VDcall Toggle(HWND)=0;
+  virtual void VDcall Display(HWND, bool)=0;
+  virtual void VDcall RedoFrame()=0;
+  virtual void VDcall RedoSystem()=0;
+  virtual void VDcall UndoSystem()=0;
+  virtual void VDcall InitButton(HWND)=0;
+  virtual void VDcall Close()=0;
+  virtual bool VDcall SampleCurrentFrame()=0;
+  virtual long VDcall SampleFrames()=0;
 };
 
 //////////
@@ -305,14 +323,18 @@ public:
 // v5 (1.3d): lots of bugfixes - stretchblt bilinear, and non-zero startproc
 // v6 (1.4): added error handling functions
 
+class FilterDefinitionList;
+
 typedef struct FilterModule {
-  struct FilterModule *next, *prev;
-  HINSTANCE       hInstModule;
-  FilterModuleInitProc  initProc;
-  FilterModuleDeinitProc  deinitProc;
-    IScriptEnvironment*   env;
-    const char*       avisynth_function_name;
-    int preroll;
+  struct FilterModule    *next, *prev;
+  HINSTANCE              hInstModule;
+  FilterModuleInitProc   initProc;
+  FilterModuleDeinitProc deinitProc;
+
+  IScriptEnvironment*    env;
+  const char*            avisynth_function_name;
+  int                    preroll;
+  FilterDefinitionList*  fdl;
 } FilterModule;
 
 typedef struct FilterDefinition {
@@ -341,18 +363,27 @@ typedef struct FilterDefinition {
 
 } FilterDefinition;
 
+class FilterDefinitionList {
+public:
+  FilterModule* fm;
+  FilterDefinition* fd;
+  FilterDefinitionList* fdl;
+
+  FilterDefinitionList(FilterModule* _fm, FilterDefinition* _fd) : fm(_fm), fd(_fd), fdl(fm->fdl) { };
+};
+
 //////////
 
 // FilterStateInfo: contains dynamic info about file being processed
 
 class FilterStateInfo {
 public:
-  int  lCurrentFrame;        // current output frame
-  int  lMicrosecsPerFrame;     // microseconds per output frame
-  int  lCurrentSourceFrame;    // current source frame
-  int  lMicrosecsPerSrcFrame;    // microseconds per source frame
-  int  lSourceFrameMS;       // source frame timestamp
-  int  lDestFrameMS;       // output frame timestamp
+  long  lCurrentFrame;         // current output frame
+  long  lMicrosecsPerFrame;    // microseconds per output frame
+  long  lCurrentSourceFrame;   // current source frame
+  long  lMicrosecsPerSrcFrame; // microseconds per source frame
+  long  lSourceFrameMS;        // source frame timestamp
+  long  lDestFrameMS;          // output frame timestamp
 };
 
 // VFBitmap: VBitmap extended to hold filter-specific information
@@ -384,19 +415,19 @@ public:
 };
 
 struct FilterFunctions {
-  FilterDefinition *(*addFilter)(FilterModule *, FilterDefinition *, int fd_len);
-  void (*removeFilter)(FilterDefinition *);
-  bool (*isFPUEnabled)();
-  bool (*isMMXEnabled)();
-  void (*InitVTables)(struct FilterVTbls *);
+  FilterDefinition *(VDcall *addFilter)(FilterModule *, FilterDefinition *, int fd_len);
+  void (VDcall *removeFilter)(FilterDefinition *);
+  bool (VDcall *isFPUEnabled)();
+  bool (VDcall *isMMXEnabled)();
+  void (VDcall *InitVTables)(struct FilterVTbls *);
 
   // These functions permit you to throw MyError exceptions from a filter.
   // YOU MUST ONLY CALL THESE IN runProc, initProc, and startProc.
 
-  void (*ExceptOutOfMemory)();        // ADDED: V6 (VirtualDub 1.4)
-  void (*Except)(const char *format, ...);  // ADDED: V6 (VirtualDub 1.4)
+  void (VDcall *ExceptOutOfMemory)();        // ADDED: V6 (VirtualDub 1.4)
+  void (VDcall *Except)(const char *format, ...);  // ADDED: V6 (VirtualDub 1.4)
 
-  int (*getCPUFlags)();            // ADDED: V6 (VirtualDub 1.4)
+  long (VDcall *getCPUFlags)();            // ADDED: V6 (VirtualDub 1.4)
 };
 
 
@@ -445,7 +476,7 @@ bool VBitmap::RectFill(PixCoord x1, PixCoord y1, PixDim dx, PixDim dy, Pixel32 c
   throw AvisynthError("Unsupported VBitmap method: RectFill");
 }
 
-bool VBitmap::Histogram(PixCoord x, PixCoord y, PixCoord dx, PixCoord dy, int *pHisto, int iHistoType) const
+bool VBitmap::Histogram(PixCoord x, PixCoord y, PixCoord dx, PixCoord dy, long *pHisto, int iHistoType) const
 {
   throw AvisynthError("Unsupported VBitmap method: Histogram");
 }
@@ -464,19 +495,19 @@ bool VBitmap::BitBltFromI420(PixCoord x2, PixCoord y2, const VBitmap *src, PixCo
 class DummyFilterPreview : public IFilterPreview {
   void Die() { throw AvisynthError("IFilterPreview not supported"); }
 public:
-  virtual void SetButtonCallback(void*, void*) { Die(); }
-  virtual void SetSampleCallback(void*, void*) { Die(); }
+  virtual void VDcall SetButtonCallback(void*, void*) { Die(); }
+  virtual void VDcall SetSampleCallback(void*, void*) { Die(); }
 
-    virtual bool isPreviewEnabled() { return false; }
-    virtual void Toggle(HWND) {}
-    virtual void Display(HWND, bool) {}
-    virtual void RedoFrame() {}
-    virtual void RedoSystem() {}
-    virtual void UndoSystem() {}
-    virtual void InitButton(HWND) {}
-    virtual void Close() {}
-    virtual bool SampleCurrentFrame() { return false; }
-    virtual int SampleFrames() { return 0; }
+    virtual bool VDcall isPreviewEnabled() { return false; }
+    virtual void VDcall Toggle(HWND) {}
+    virtual void VDcall Display(HWND, bool) {}
+    virtual void VDcall RedoFrame() {}
+    virtual void VDcall RedoSystem() {}
+    virtual void VDcall UndoSystem() {}
+    virtual void VDcall InitButton(HWND) {}
+    virtual void VDcall Close() {}
+    virtual bool VDcall SampleCurrentFrame() { return false; }
+    virtual long VDcall SampleFrames() { return 0; }
 };
 
 
@@ -484,7 +515,7 @@ public:
 
 char exception_conversion_buffer[2048];
 
-static void FilterThrowExcept(const char *format, ...) {
+static void VDcall FilterThrowExcept(const char *format, ...) {
   va_list val;
   va_start(val, format);
   _vsnprintf(exception_conversion_buffer, sizeof(exception_conversion_buffer)-1, format, val);
@@ -493,26 +524,33 @@ static void FilterThrowExcept(const char *format, ...) {
   throw AvisynthError(exception_conversion_buffer);
 }
 
-static void FilterThrowExceptMemory() {
+static void VDcall FilterThrowExceptMemory() {
   throw AvisynthError("VDubFilter: Out of memory.");
 }
 
 // This is really disgusting...
 
-static void InitVTables(struct FilterVTbls *pvtbls) {
+#pragma warning( push )
+#pragma warning (disable: 4238) // nonstandard extension used : class rvalue used as lvalue
+static void VDcall InitVTables(struct FilterVTbls *pvtbls) {
   pvtbls->pvtblVBitmap = *(void **)&VBitmap();
 }
 
 
-FilterDefinition *FilterAdd(FilterModule *fm, FilterDefinition *pfd, int fd_len);
+FilterDefinition *VDcall FilterAdd(FilterModule *fm, FilterDefinition *pfd, int fd_len);
 
-void FilterRemove(FilterDefinition*) {}
+void VDcall FilterRemove(FilterDefinition*) {}
 
-bool isFPUEnabled() { return !!(GetCPUFlags() & CPUF_FPU); }
-bool isMMXEnabled() { return !!(GetCPUFlags() & CPUF_MMX); }
+static long VDcall VD_GetCPUFlags() {
+  return GetCPUFlags();
+}
+
+bool VDcall isFPUEnabled() { return !!(GetCPUFlags() & CPUF_FPU); }
+bool VDcall isMMXEnabled() { return !!(GetCPUFlags() & CPUF_MMX); }
 
 FilterFunctions g_filterFuncs={
-  FilterAdd, FilterRemove, isFPUEnabled, isMMXEnabled, InitVTables, FilterThrowExceptMemory, FilterThrowExcept, GetCPUFlags
+  FilterAdd, FilterRemove, isFPUEnabled, isMMXEnabled, InitVTables, 
+  FilterThrowExceptMemory, FilterThrowExcept, VD_GetCPUFlags
 };
 
 
@@ -523,26 +561,27 @@ class MyScriptInterpreter : public IScriptInterpreter {
   IScriptEnvironment* const env;
 public:
   MyScriptInterpreter(IScriptEnvironment* _env) : env(_env) {}
-  void Destroy() {}
-  void SetRootHandler(void*, void*) {}
-  void ExecuteLine(char *s) {}
-  void ScriptError(int e) {
+  void VDcall Destroy() {}
+  void VDcall SetRootHandler(void*, void*) {}
+  void VDcall ExecuteLine(char *s) {}
+  void VDcall ScriptError(int e) {
     switch (e) {
       case 21: env->ThrowError("VirtualdubFilterProxy: OUT_OF_MEMORY");
       case 24: env->ThrowError("VirtualdubFilterProxy: FCALL_OUT_OF_RANGE");
       case 26: env->ThrowError("VirtualdubFilterProxy: FCALL_UNKNOWN_STR");
-      default: env->ThrowError("VirtualdubFilterProxy: unknown error code");
+      default: env->ThrowError("VirtualdubFilterProxy: Unknown error code %d", e);
     }
   }
-  char* TranslateScriptError(void* cse) { return ""; }
-  char** AllocTempString(int l) { return (char**)0; }
-  CScriptValue LookupObjectMember(CScriptObject *obj, void *, char *szIdent) { return CScriptValue(); }
+  char* VDcall TranslateScriptError(void* cse) { return ""; }
+  char** VDcall AllocTempString(long l) { return (char**)0; }
+  CScriptValue VDcall LookupObjectMember(CScriptObject *obj, void *, char *szIdent) { return CScriptValue(); }
 };
 
 
 class VirtualdubFilterProxy : public GenericVideoFilter {
   PVideoFrame src, dst, last;
   VFBitmap vbSrc, vbDst, vbLast;
+  FilterDefinitionList* const fdl;
   FilterDefinition* const fd;
   FilterStateInfo fsi;
   FilterActivation fa;
@@ -570,9 +609,11 @@ class VirtualdubFilterProxy : public GenericVideoFilter {
   }
 
 public:
-  VirtualdubFilterProxy(PClip _child, FilterDefinition* _fd, AVSValue args, IScriptEnvironment* env)
-    : GenericVideoFilter(_child), fd(_fd), fa(vbDst, vbSrc, &vbLast)
+  VirtualdubFilterProxy(PClip _child, FilterDefinitionList* _fdl, AVSValue args, IScriptEnvironment* env)
+    : GenericVideoFilter(_child), fdl(_fdl), fd(_fdl->fd), fa(vbDst, vbSrc, &vbLast)
   {
+	if (!fd)
+		env->ThrowError("VirtualdubFilterProxy: No FilterDefinition structure!");
     if (!vi.IsRGB32())
       throw AvisynthError("VirtualdubFilterProxy: only RGB32 supported for VirtualDub filters");
 
@@ -598,7 +639,7 @@ public:
     SetVFBitmap(src, &vbLast);
     SetVFBitmap(src, &vbDst);
 
-    int flags = fd->paramProc ? fd->paramProc(&fa, &g_filterFuncs) : FILTERPARAM_SWAP_BUFFERS;
+    long flags = fd->paramProc ? fd->paramProc(&fa, &g_filterFuncs) : FILTERPARAM_SWAP_BUFFERS;
     bool two_buffers = !!(flags & FILTERPARAM_SWAP_BUFFERS);
     bool needs_last = !!(flags & FILTERPARAM_NEEDS_LAST);
     bool src_needs_hdc = (vbSrc.dwFlags & VFBitmap::NEEDS_HDC);
@@ -615,7 +656,7 @@ public:
     }
 
     if (two_buffers) {
-      vi.width = vbDst.pitch >> 2;
+      vi.width = int(vbDst.pitch >> 2);
       vi.height = vbDst.h;
       dst = env->NewVideoFrame(vi);
       SetVFBitmap(dst, &vbDst);
@@ -676,15 +717,23 @@ public:
     return FilterFrame(n, env, false);
   }
 
-  static int ConvertArgs(const AVSValue* args, CScriptValue* sylia_args, int count) {
+  static int ConvertArgs(const AVSValue* args, CScriptValue* sylia_args, CScriptValueStringHelper* sylia_args_string_helper, int count) {
     for (int i=0; i<count; ++i) {
       if (args[i].IsInt()) {
         sylia_args[i] = args[i].AsInt();
+      } else if (args[i].IsFloat()) { // new from 160420 double support
+        sylia_args[i] = args[i].AsFloat();
       } else if (args[i].IsString()) {
+        // Oops, where can we put the pointer to pointer in x64? no place in CScriptValue struct
+        // helper class/struct needed.
+        sylia_args_string_helper[i].lpVoid = (void*)args[i].AsString();
+        sylia_args[i] = (char**)&sylia_args_string_helper[i].lpVoid;
+        /* original, works only for 32 bit
         sylia_args[i].lpVoid = (void*)args[i].AsString();
         sylia_args[i] = (char**)&sylia_args[i].lpVoid;
+        */
       } else if (args[i].IsArray()) {
-        return i+ConvertArgs(&args[i][0], sylia_args+i, args[i].ArraySize());
+        return i+ConvertArgs(&args[i][0], sylia_args+i, sylia_args_string_helper+i, args[i].ArraySize()); 
       } else {
         return -1000;
       }
@@ -699,6 +748,8 @@ public:
         int j;
         for (j=1; j<args.ArraySize(); j++) {
           if (p[j] == 'i' && args[j].IsInt()) continue;
+          //else if (p[j] == 'l' && args[j].IsInt()) continue;  // n/a only Int in avs
+          else if (p[j] == 'd' && args[j].IsFloat()) continue;  // 160420 type double support
           else if (p[j] == 's' && args[j].IsString()) continue;
           else if (p[j] == '.' && args[j].IsArray()) continue;
           else break;
@@ -707,9 +758,10 @@ public:
           // match
           MyScriptInterpreter si(env);
           CScriptValue sylia_args[30];
-          int sylia_arg_count = ConvertArgs(&args[1], sylia_args, args.ArraySize()-1);
+          CScriptValueStringHelper sylia_args_string_helper[30]; // helper class. x64 char ** helper did not fit into CScriptValue class size 
+          int sylia_arg_count = ConvertArgs(&args[1], sylia_args, sylia_args_string_helper, args.ArraySize()-1);
           if (sylia_arg_count < 0)
-            env->ThrowError("VirtualdubFilterProxy: arguments (after first) must be integers and strings only");
+            env->ThrowError("VirtualdubFilterProxy: arguments (after first) must be integers, double and strings only"); // 160420 double
           i->func_ptr(&si, &fa, sylia_args, sylia_arg_count);
           return;
         }
@@ -720,25 +772,39 @@ public:
 
   ~VirtualdubFilterProxy() {
     CallEndProc();
+	FreeFilterModule(fdl->fm);
     if (vbSrc.hdc)
       ReleaseDC(NULL, vbSrc.hdc);
   }
 
+  void __cdecl FreeFilterModule(FilterModule* fm) {
+	  for (FilterDefinitionList* fdl = fm->fdl; fdl; fdl = fdl->fdl) {
+		  delete fdl->fd;
+		  fdl->fd = 0;
+	  }
+
+	  fm->deinitProc(fm, &g_filterFuncs);
+	  FreeLibrary(fm->hInstModule);
+	  if (fm->prev)
+		  fm->prev->next = fm->next;
+	  if (fm->next)
+		  fm->next->prev = fm->prev;
+	  delete fm;
+  }
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-    FilterDefinition* fd = (FilterDefinition*)user_data;
-    return new VirtualdubFilterProxy(args[0].AsClip(), fd, args, env);
+    FilterDefinitionList* fdl = (FilterDefinitionList*)user_data;
+    return new VirtualdubFilterProxy(args[0].AsClip(), fdl, args, env);
   }
 };
 
 
-void __cdecl FreeFilterDefinition(void* user_data, IScriptEnvironment* env) {
-  FilterDefinition* fd = (FilterDefinition*)user_data;
-  delete fd;
-}
-
-
-FilterDefinition *FilterAdd(FilterModule *fm, FilterDefinition *pfd, int fd_len) {
+FilterDefinition *VDcall FilterAdd(FilterModule *fm, FilterDefinition *pfd, int fd_len) {
   FilterDefinition *fd = new(std::nothrow) FilterDefinition;
+
+  FilterDefinitionList _fdl(fm, fd);
+  FilterDefinitionList *fdl = (FilterDefinitionList*)fm->env->SaveString((const char*)&_fdl, sizeof(_fdl));
+  fm->fdl = fdl;
 
   if (fd) {
     memcpy(fd, pfd, min(size_t(fd_len), sizeof(FilterDefinition)));
@@ -747,13 +813,11 @@ FilterDefinition *FilterAdd(FilterModule *fm, FilterDefinition *pfd, int fd_len)
     fd->next  = NULL;
   }
 
-  fm->env->AtExit(FreeFilterDefinition, fd);
-
-  fm->env->AddFunction(fm->avisynth_function_name, "c", VirtualdubFilterProxy::Create, fd);
+  fm->env->AddFunction(fm->avisynth_function_name, "c", VirtualdubFilterProxy::Create, fdl);
   if (fd->script_obj && fd->script_obj->func_list) {
     for (ScriptFunctionDef* i = fd->script_obj->func_list; i->arg_list; i++) {
       const char* params = fm->env->Sprintf("c%s%s", i->arg_list+1, strchr(i->arg_list+1, '.') ? "*" : "");
-      fm->env->AddFunction(fm->avisynth_function_name, params, VirtualdubFilterProxy::Create, fd);
+      fm->env->AddFunction(fm->avisynth_function_name, params, VirtualdubFilterProxy::Create, fdl);
     }
   }
 
@@ -761,19 +825,7 @@ FilterDefinition *FilterAdd(FilterModule *fm, FilterDefinition *pfd, int fd_len)
 }
 
 
-void __cdecl FreeFilterModule(void* user_data, IScriptEnvironment* env) {
-  FilterModule* fm = (FilterModule*)user_data;
-  fm->deinitProc(fm, &g_filterFuncs);
-  FreeLibrary(fm->hInstModule);
-  if (fm->prev)
-    fm->prev->next = fm->next;
-  if (fm->next)
-    fm->next->prev = fm->prev;
-  delete fm;
-}
-
-
-AVSValue LoadVirtualdubPlugin(AVSValue args, void*, IScriptEnvironment* env) {
+AVSValue __cdecl LoadVirtualdubPlugin(AVSValue args, void*, IScriptEnvironment* env) {
   const char* const szModule = args[0].AsString();
   const char* const avisynth_function_name = args[1].AsString();
   const int preroll = args[2].AsInt(0);
@@ -812,10 +864,16 @@ AVSValue LoadVirtualdubPlugin(AVSValue args, void*, IScriptEnvironment* env) {
   fm->preroll = preroll;
   fm->next = loaded_modules;
   fm->prev = 0;
+  fm->fdl = 0;
 
   int ver_hi = VIRTUALDUB_FILTERDEF_VERSION;
   int ver_lo = VIRTUALDUB_FILTERDEF_COMPATIBLE;
   if (fm->initProc(fm, &g_filterFuncs, ver_hi, ver_lo)) {
+    // Neuter any AVS functions that may have been created
+    for (FilterDefinitionList* fdl = fm->fdl; fdl; fdl = fdl->fdl) {
+      delete fdl->fd;
+      fdl->fd = 0;
+    }
     FreeLibrary(hmodule);
     delete fm;
     env->ThrowError("LoadVirtualdubPlugin: Error initializing module \"%s\"", szModule);
@@ -825,7 +883,6 @@ AVSValue LoadVirtualdubPlugin(AVSValue args, void*, IScriptEnvironment* env) {
     fm->next->prev = fm;
 
   env->SetGlobalVar("$LoadVirtualdubPlugin$", (const char*)fm);
-  env->AtExit(FreeFilterModule, fm);
 
   return AVSValue();
 }

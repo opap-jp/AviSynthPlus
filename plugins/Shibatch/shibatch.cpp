@@ -12,12 +12,12 @@ e-mail   : shibatch@users.sourceforge.net
 
 Some changes are from foobar2000 (www.foobar2000.org):
 
-Copyright © 2001-2003, Peter Pawlowski
+Copyright (c) 2001-2003, Peter Pawlowski
 All rights reserved.
 
 Other changes are:
 
-Copyright © 2003, Klaus Post
+Copyright (c) 2003, Klaus Post
 
 *******************************************************/
 
@@ -32,7 +32,7 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
   env->AddFunction("SSRC", "ci[fast]b", Create_SSRC, 0);
 
   env->AddFunction("SuperEQ", "cs", Create_SuperEq, 0);
-  env->AddFunction("SuperEQ", "cf+", Create_SuperEqCustom, 0);
+  env->AddFunction("SuperEQ", "ci+", Create_SuperEqCustom, 0);
 
   return "`Shibatch' Audio equalization and high-quality resampling from Naoki Shibata";
 }

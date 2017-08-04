@@ -24,8 +24,15 @@ IF( MSVC_IDE )  # Check for Visual Studio
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Output/system")
 
   # We want our project to also run on Windows XP
-  set(CMAKE_GENERATOR_TOOLSET "v120_xp" CACHE STRING "The compiler toolset to use for Visual Studio." FORCE)
-
+  IF( MSVC_VERSION VERSION_LESS 1900 )  # Check for v11 (VS 2012)
+    set(CMAKE_GENERATOR_TOOLSET "v120_xp" CACHE STRING "The compiler toolset to use for Visual Studio." FORCE)
+  ELSE()
+    set(CMAKE_GENERATOR_TOOLSET "v140_xp" CACHE STRING "The compiler toolset to use for Visual Studio." FORCE)
+    
+    # https://connect.microsoft.com/VisualStudio/feedback/details/1789709/visual-c-2015-runtime-broken-on-windows-server-2003-c-11-magic-statics
+    add_definitions("/Zc:threadSafeInit-")
+  ENDIF()
+  
   # Enable C++ with SEH exceptions
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /EHa")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHa")
@@ -36,6 +43,8 @@ IF( MSVC_IDE )  # Check for Visual Studio
   # Enable CRT heap debugging - only effective in debug builds
   add_definitions("/D _CRTDBG_MAP_ALLOC")
   
+  add_definitions("/D __SSE2__")
+
   if(CMAKE_SIZEOF_VOID_P EQUAL 4)
     # VC++ enables the SSE2 instruction set by default even on 32-bits. Step back a bit.
     add_definitions("/arch:SSE")
@@ -44,6 +53,10 @@ IF( MSVC_IDE )  # Check for Visual Studio
   # Set additional optimization flags
   set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Oy /Ot /GS-")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Oy /Ot /GS-")
+ELSE()
+
+  SET( CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -std=gnu++14" )
+  SET( CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -march=native" )
 
 ENDIF()
 

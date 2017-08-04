@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <avisynth_c.h>
 #include "strings.h"
+#include "InternalEnvironment.h"
 #include <cassert>
 
 typedef const char* (__stdcall *AvisynthPluginInit3Func)(IScriptEnvironment* env, const AVS_Linkage* const vectors);
@@ -160,21 +161,33 @@ static bool IsValidParameterString(const char* p) {
 ---------------------------------------------------------------------------------
 */
 
-AVSFunction::AVSFunction(void*) : 
-    AVSFunction(NULL, NULL, NULL, NULL, NULL)
+AVSFunction::AVSFunction(void*) :
+    AVSFunction(NULL, NULL, NULL, NULL, NULL, NULL)
 {}
 
 AVSFunction::AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply) :
-    AVSFunction(_name, _plugin_basename, _param_types, _apply, NULL)
+    AVSFunction(_name, _plugin_basename, _param_types, _apply, NULL, NULL)
 {}
 
 AVSFunction::AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply, void *_user_data) :
-    apply(_apply), name(NULL), canon_name(NULL), param_types(NULL), user_data(_user_data)
+    AVSFunction(_name, _plugin_basename, _param_types, _apply, _user_data, NULL)
+{}
+
+AVSFunction::AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply, void *_user_data, const char* _dll_path) :
+    apply(_apply), name(NULL), canon_name(NULL), param_types(NULL), user_data(_user_data), dll_path(NULL)
 {
-    if ( NULL != _name )
+    if (NULL != _dll_path)
+    {
+        size_t len = strlen(_dll_path);
+        dll_path = new char[len + 1];
+        memcpy(dll_path, _dll_path, len);
+        dll_path[len] = 0;
+    }
+
+    if (NULL != _name)
     {
         size_t len = strlen(_name);
-        name = new char[len+1];
+        name = new char[len + 1];
         memcpy(name, _name, len);
         name[len] = 0;
     }
@@ -187,9 +200,9 @@ AVSFunction::AVSFunction(const char* _name, const char* _plugin_basename, const 
         param_types[len] = 0;
     }
 
-    if ( (NULL != _name) && (NULL != _plugin_basename) )
+    if ( NULL != _name )
     {
-        std::string cn(_plugin_basename);
+		std::string cn(NULL != _plugin_basename ? _plugin_basename : "");
         cn.append("_").append(_name);
         canon_name = new char[cn.size()+1];
         memcpy(canon_name, cn.c_str(), cn.size());
@@ -202,6 +215,7 @@ AVSFunction::~AVSFunction()
     delete [] canon_name;
     delete [] name;
     delete [] param_types;
+    delete [] dll_path;
 }
 
 bool AVSFunction::empty() const
@@ -211,7 +225,11 @@ bool AVSFunction::empty() const
 
 bool AVSFunction::IsScriptFunction() const
 {
-    return apply == &(ScriptFunction::Execute);
+    return ( (apply == &(ScriptFunction::Execute))
+		  || (apply == &Eval)
+          || (apply == &EvalOop)
+          || (apply == &Import)
+        );
 }
 
 bool AVSFunction::SingleTypeMatch(char type, const AVSValue& arg, bool strict) {
@@ -344,7 +362,7 @@ struct PluginFile
   PluginFile(const std::string &filePath);
 };
 
-PluginFile::PluginFile(const std::string &filePath) : 
+PluginFile::PluginFile(const std::string &filePath) :
   FilePath(GetFullPathNameWrap(filePath)), BaseName(), Library(NULL)
 {
   // Turn all '\' into '/'
@@ -386,7 +404,7 @@ PluginFile::PluginFile(const std::string &filePath) :
 ---------------------------------------------------------------------------------
 */
 
-PluginManager::PluginManager(IScriptEnvironment2* env) :
+PluginManager::PluginManager(InternalEnvironment* env) :
   Env(env), PluginInLoad(NULL), AutoloadExecuted(false), Autoloading(false)
 {
   env->SetGlobalVar("$PluginFunctions$", AVSValue(""));
@@ -480,7 +498,7 @@ void PluginManager::AutoloadPlugins()
         {
           if (streqi(AutoLoadedPlugins[i].BaseName.c_str(), p.BaseName.c_str()))
           {
-            // Prevent loading a plugin with a basename that is 
+            // Prevent loading a plugin with a basename that is
             // already loaded (from another autoload folder).
             continue;
           }
@@ -519,7 +537,7 @@ void PluginManager::AutoloadPlugins()
         {
           if (streqi(AutoLoadedImports[i].BaseName.c_str(), p.BaseName.c_str()))
           {
-            // Prevent loading a plugin with a basename that is 
+            // Prevent loading a plugin with a basename that is
             // already loaded (from another autoload folder).
             continue;
           }
@@ -585,9 +603,9 @@ void PluginManager::UpdateFunctionExports(const char* funcName, const char* func
   const char *oldFnList = Env->GetVar(exportVar, "");
   std::string FnList(oldFnList);
   if (FnList.size() > 0)    // if the list is not empty...
-    FnList.push_back(' ');  // ...add a delimiting whitespace 
+    FnList.push_back(' ');  // ...add a delimiting whitespace
   FnList.append(funcName);
-  Env->SetGlobalVar(exportVar, AVSValue( Env->SaveString(FnList.c_str(), FnList.size()) ));
+  Env->SetGlobalVar(exportVar, AVSValue( Env->SaveString(FnList.c_str(), (int)FnList.size()) ));
 
   // Update $Plugin!...!Param$
   std::string param_id;
@@ -595,12 +613,13 @@ void PluginManager::UpdateFunctionExports(const char* funcName, const char* func
   param_id.append("$Plugin!");
   param_id.append(funcName);
   param_id.append("!Param$");
-  Env->SetGlobalVar(Env->SaveString(param_id.c_str(), param_id.size()), AVSValue(Env->SaveString(funcParams)));
+  Env->SetGlobalVar(Env->SaveString(param_id.c_str(), (int)param_id.size()), AVSValue(Env->SaveString(funcParams)));
 }
 
 bool PluginManager::LoadPlugin(const char* path, bool throwOnError, AVSValue *result)
 {
-  return LoadPlugin(PluginFile(path), throwOnError, result);
+  auto pf = PluginFile { path };
+  return LoadPlugin(pf, throwOnError, result);
 }
 
 bool PluginManager::LoadPlugin(PluginFile &plugin, bool throwOnError, AVSValue *result)
@@ -623,7 +642,7 @@ bool PluginManager::LoadPlugin(PluginFile &plugin, bool throwOnError, AVSValue *
   DllDirChanger dllchange(plugin_dir.c_str());
 
   // Load the dll into memory
-  plugin.Library = LoadLibrary(plugin.FilePath.c_str());
+  plugin.Library = LoadLibraryEx(plugin.FilePath.c_str(), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
   if (plugin.Library == NULL)
   {
     if (throwOnError)
@@ -698,6 +717,21 @@ bool PluginManager::FunctionExists(const char* name) const
     return autoloaded || (ExternalFunctions.find(name) != ExternalFunctions.end());
 }
 
+// A minor helper function
+static bool FunctionListHasDll(const FunctionList &list, const char *dll_path)
+{
+    for (const auto &f : list) {
+        if ( (nullptr == f->dll_path) || (nullptr == dll_path) ) {
+            if (f->dll_path == dll_path) {
+                return true;
+            }
+        } else if (streqi(f->dll_path, dll_path)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void PluginManager::AddFunction(const char* name, const char* params, IScriptEnvironment::ApplyFunc apply, void* user_data, const char *exportVar)
 {
   if (!IsValidParameterString(params))
@@ -708,18 +742,39 @@ void PluginManager::AddFunction(const char* name, const char* params, IScriptEnv
   AVSFunction *newFunc = NULL;
   if (PluginInLoad != NULL)
   {
-      newFunc = new AVSFunction(name, PluginInLoad->BaseName.c_str(), params, apply, user_data);
+      newFunc = new AVSFunction(name, PluginInLoad->BaseName.c_str(), params, apply, user_data, PluginInLoad->FilePath.c_str());
   }
   else
   {
-      newFunc = new AVSFunction(name, NULL, params, apply, user_data);
+      newFunc = new AVSFunction(name, NULL, params, apply, user_data, NULL);
       assert(newFunc->IsScriptFunction());
   }
+
+  // Warn user if a function with the same name is already registered by another plugin
+  {
+      const auto &it = functions.find(newFunc->name);
+      if ( (functions.end() != it) && !FunctionListHasDll(it->second, newFunc->dll_path) )
+      {
+          OneTimeLogTicket ticket(LOGTICKET_W1008, newFunc->name);
+          Env->LogMsgOnce(ticket, LOGLEVEL_WARNING, "%s() is defined by multiple plugins. Calls to this filter might be ambiguous and could result in the wrong function being called.", newFunc->name);
+      }
+  }
+
   functions[newFunc->name].push_back(newFunc);
   UpdateFunctionExports(newFunc->name, newFunc->param_types, exportVar);
 
   if (NULL != newFunc->canon_name)
   {
+      // Warn user if a function with the same name is already registered by another plugin
+      {
+          const auto &it = functions.find(newFunc->canon_name);
+          if ((functions.end() != it) && !FunctionListHasDll(it->second, newFunc->dll_path))
+          {
+              OneTimeLogTicket ticket(LOGTICKET_W1008, newFunc->canon_name);
+              Env->LogMsgOnce(ticket, LOGLEVEL_WARNING, "%s() is defined by multiple plugins. Calls to this filter might be ambiguous and could result in the wrong function being called.", newFunc->name);
+          }
+      }
+
       functions[newFunc->canon_name].push_back(newFunc);
       UpdateFunctionExports(newFunc->canon_name, newFunc->param_types, exportVar);
   }
@@ -773,9 +828,15 @@ bool PluginManager::TryAsAvs25(PluginFile &plugin, AVSValue *result)
 
 bool PluginManager::TryAsAvsC(PluginFile &plugin, AVSValue *result)
 {
+#ifdef _WIN64
+  AvisynthCPluginInitFunc AvisynthCPluginInit = (AvisynthCPluginInitFunc)GetProcAddress(plugin.Library, "avisynth_c_plugin_init");
+  if (!AvisynthCPluginInit)
+    AvisynthCPluginInit = (AvisynthCPluginInitFunc)GetProcAddress(plugin.Library, "_avisynth_c_plugin_init@4");
+#else // _WIN32
   AvisynthCPluginInitFunc AvisynthCPluginInit = (AvisynthCPluginInitFunc)GetProcAddress(plugin.Library, "_avisynth_c_plugin_init@4");
   if (!AvisynthCPluginInit)
     AvisynthCPluginInit = (AvisynthCPluginInitFunc)GetProcAddress(plugin.Library, "avisynth_c_plugin_init@4");
+#endif
 
   if (AvisynthCPluginInit == NULL)
     return false;
@@ -788,7 +849,7 @@ bool PluginManager::TryAsAvsC(PluginFile &plugin, AVSValue *result)
         AVS_ScriptEnvironment *pe;
         pe = &e;
         const char *s = NULL;
-#ifdef X86_32
+#if defined(X86_32) && defined(MSVC)
         int callok = 1; // (stdcall)
         __asm // Tritical - Jan 2006
         {
@@ -857,12 +918,12 @@ bool PluginManager::TryAsAvsC(PluginFile &plugin, AVSValue *result)
 ---------------------------------------------------------------------------------
 */
 
-AVSValue LoadPlugin(AVSValue args, void* user_data, IScriptEnvironment* env) 
+AVSValue LoadPlugin(AVSValue args, void* user_data, IScriptEnvironment* env)
 {
   IScriptEnvironment2 *env2 = static_cast<IScriptEnvironment2*>(env);
 
   bool success = true;
-  for (int i = 0; i < args.ArraySize(); ++i)
+  for (int i = 0; i < args[0].ArraySize(); ++i)
   {
     AVSValue dummy;
     success &= env2->LoadPlugin(args[0][i].AsString(), true, &dummy);

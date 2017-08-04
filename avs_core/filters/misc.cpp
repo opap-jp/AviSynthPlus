@@ -81,7 +81,7 @@ PVideoFrame FixLuminance::GetFrame(int n, IScriptEnvironment* env)
   {
     const int subtract = (vertex-y)*16/slope;
     for (int x=0; x<vi.width; ++x)
-      p[x*2] = max(0, p[x*2]-subtract);
+      p[x*2] = (BYTE)max(0, p[x*2]-subtract);
     p += pitch;
   }
   return frame;
@@ -163,14 +163,14 @@ PVideoFrame PeculiarBlend::GetFrame(int n, IScriptEnvironment* env) {
 
   if (cutoff-31 > 0) {
     int copy_top = min(cutoff-31, vi.height);
-    BitBlt(main, main_pitch, other, other_pitch, row_size, copy_top);
+    env->BitBlt(main, main_pitch, other, other_pitch, row_size, copy_top);
     main += main_pitch * copy_top;
     other += other_pitch * copy_top;
   }
   for (int y = max(0, cutoff-31); y < min(cutoff, vi.height-1); ++y) {
     int scale = cutoff - y;
     for (int x = 0; x < row_size; ++x)
-      main[x] += ((other[x] - main[x]) * scale + 16) >> 5;
+      main[x] = main[x] + BYTE(((other[x] - main[x]) * scale + 16) >> 5);
     main += main_pitch;
     other += other_pitch;
   }
@@ -196,8 +196,8 @@ AVSValue __cdecl PeculiarBlend::Create(AVSValue args, void*, IScriptEnvironment*
 SkewRows::SkewRows(PClip _child, int skew, IScriptEnvironment* env)
  : GenericVideoFilter(_child)
 {
-  if (!vi.IsY8() && vi.IsPlanar())
-    env->ThrowError("SkewRows: requires non Planar input");
+  if ((vi.NumComponents() > 1) && vi.IsPlanar())
+    env->ThrowError("SkewRows: requires non-planar or greyscale input");
 
   if (vi.IsYUY2() && skew&1)
     env->ThrowError("SkewRows: For YUY2 skew must be even");

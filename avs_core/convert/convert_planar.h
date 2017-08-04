@@ -149,15 +149,86 @@ public:
                          const AVSValue& OutPlacement, IScriptEnvironment* env);
   ~ConvertToPlanarGeneric() {}
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
-  static AVSValue __cdecl CreateYV12(AVSValue args, void*, IScriptEnvironment* env);   
-  static AVSValue __cdecl CreateYV16(AVSValue args, void*, IScriptEnvironment* env);   
-  static AVSValue __cdecl CreateYV24(AVSValue args, void*, IScriptEnvironment* env);   
-  static AVSValue __cdecl CreateYV411(AVSValue args, void*, IScriptEnvironment* env);   
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+    return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+  }
+
+  static AVSValue __cdecl CreateYV411(AVSValue args, void*, IScriptEnvironment* env);
+  static AVSValue __cdecl CreateYUV420(AVSValue args, void*, IScriptEnvironment* env);
+  static AVSValue __cdecl CreateYUV422(AVSValue args, void*, IScriptEnvironment* env);
+  static AVSValue __cdecl CreateYUV444(AVSValue args, void*, IScriptEnvironment* env);
+
 private:
-  bool Y8input;
+  static AVSValue Create(AVSValue& args, const char* filter, IScriptEnvironment* env);
+  bool Yinput;
+  int pixelsize;
   PClip Usource;
   PClip Vsource;
 };
+
+
+//--------------- planar bit depth conversions
+// todo: separate file?
+typedef void (*BitDepthConvFuncPtr)(const BYTE *srcp, BYTE *dstp, int src_rowsize, int src_height, int src_pitch, int dst_pitch, float float_range);
+
+class ConvertTo8bit : public GenericVideoFilter
+{
+public:
+  ConvertTo8bit(PClip _child, const float _float_range, const int _dither_mode, IScriptEnvironment* env);
+  PVideoFrame __stdcall GetFrame(int n,IScriptEnvironment* env);
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+    return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void*, IScriptEnvironment* env);  
+private:
+  BitDepthConvFuncPtr conv_function;
+  float float_range;
+  int dither_mode;
+  int pixelsize;
+};
+
+class ConvertTo16bit : public GenericVideoFilter
+{
+public:
+  ConvertTo16bit(PClip _child, const float _float_range, const int _dither_mode, const int _bitdepth, bool _modify_range, IScriptEnvironment* env);
+  PVideoFrame __stdcall GetFrame(int n,IScriptEnvironment* env);
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+    return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void*, IScriptEnvironment* env);  
+private:
+  BitDepthConvFuncPtr conv_function;
+  float float_range;
+  int dither_mode;
+  int pixelsize;
+  int bitdepth; // effective 10/12/14/16 bits within the 2 byte container
+  bool modify_range; // if 16->10 range reducing or e.g. 14->16 bit range expansion needed
+  bool change_only_format; // if 16->10 bit affects only pixel_type
+};
+
+class ConvertToFloat : public GenericVideoFilter
+{
+public:
+  ConvertToFloat(PClip _child, const float _float_range, const int _dither_mode, IScriptEnvironment* env);
+  PVideoFrame __stdcall GetFrame(int n,IScriptEnvironment* env);
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+    return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void*, IScriptEnvironment* env);  
+private:
+  BitDepthConvFuncPtr conv_function;
+  float float_range;
+  int dither_mode;
+  int pixelsize;
+};
+
 
 
 #endif

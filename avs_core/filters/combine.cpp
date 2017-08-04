@@ -38,7 +38,7 @@
 #include <avs/minmax.h>
 #include <cmath>
 #include <cassert>
-#include <new>
+#include <algorithm>
 
 
 
@@ -52,8 +52,8 @@ extern const AVSFunction Combine_filters[] = {
   { "StackHorizontal", BUILTIN_FUNC_PREFIX, "cc+", StackHorizontal::Create },
   { "ShowFiveVersions", BUILTIN_FUNC_PREFIX, "ccccc", ShowFiveVersions::Create },
   { "Animate", BUILTIN_FUNC_PREFIX, "iis.*", Animate::Create },  // start frame, end frame, filter, start-args, end-args
-  { "Animate", BUILTIN_FUNC_PREFIX, "ciis.*", Animate::Create }, 
-  { "ApplyRange", BUILTIN_FUNC_PREFIX, "ciis.*", Animate::Create_Range }, 
+  { "Animate", BUILTIN_FUNC_PREFIX, "ciis.*", Animate::Create },
+  { "ApplyRange", BUILTIN_FUNC_PREFIX, "ciis.*", Animate::Create_Range },
   { 0 }
 };
 
@@ -85,82 +85,62 @@ StackVertical::StackVertical(const std::vector<PClip>& child_array, IScriptEnvir
 
     vi.height += vin.height;
   }
+
+  // reverse the order of the clips in RGB mode because it's upside-down
+  if (vi.IsRGB())
+    std::reverse(children.begin(), children.end());
 }
 
 
-PVideoFrame __stdcall StackVertical::GetFrame(int n, IScriptEnvironment* env) 
+PVideoFrame __stdcall StackVertical::GetFrame(int n, IScriptEnvironment* env)
 {
-  const size_t nClips = children.size();
-  auto frames = static_cast<PVideoFrame*>(alloca(sizeof(PVideoFrame)*nClips));
+  std::vector<PVideoFrame> frames;
+  frames.reserve(children.size());
 
-  for (size_t i = 0; i < nClips; ++i) {
-    new(frames+i) PVideoFrame;
-    frames[i] = children[i]->GetFrame(n, env);
-  }
+  for (const auto& child: children)
+    frames.emplace_back(child->GetFrame(n, env));
 
   PVideoFrame dst = env->NewVideoFrame(vi);
 
   const int dst_pitch = dst->GetPitch();
   const int row_size = dst->GetRowSize();
-
   BYTE* dstp = dst->GetWritePtr();
-  if (vi.IsRGB()) {
-    // reverse the order of the clips in RGB mode because it's upside-down
-    for (size_t i = children.size(); i-- > 0; /* empty */)
-    {
-      const BYTE* srcp = frames[i]->GetReadPtr();
-      const int src_pitch = frames[i]->GetPitch();
-      const int src_height = frames[i]->GetHeight();
 
-      env->BitBlt(dstp, dst_pitch, srcp, src_pitch, row_size, src_height);
-      dstp += dst_pitch * src_height;
-    }
+  for (const auto& src: frames)
+  {
+    const int src_height = src->GetHeight();
+    env->BitBlt(dstp, dst_pitch, src->GetReadPtr(), src->GetPitch(), row_size, src_height);
+    dstp += dst_pitch * src_height;
   }
-  else {
-    for (size_t i = 0; i < nClips; ++i)
+
+  if (vi.IsPlanar() && (vi.NumComponents() > 1))
+  {
+    // Copy Planar
+    const int dst_pitchUV = dst->GetPitch(PLANAR_U);
+    const int row_sizeUV = dst->GetRowSize(PLANAR_U);
+
+    for (const int& plane: { PLANAR_U, PLANAR_V })
     {
-      const BYTE* srcp = frames[i]->GetReadPtr();
-      const int src_pitch = frames[i]->GetPitch();
-      const int src_height = frames[i]->GetHeight();
-
-      env->BitBlt(dstp, dst_pitch, srcp, src_pitch, row_size, src_height);
-      dstp += dst_pitch * src_height;
-    }
-    
-    if (vi.IsPlanar() && !vi.IsY8()) {
-      // Copy Planar
-      const int dst_pitchUV = dst->GetPitch(PLANAR_U);
-      const int row_sizeUV = dst->GetRowSize(PLANAR_U);
-      const static int planes[2] = { PLANAR_U, PLANAR_V };
-
-      for (int plane: planes) {
-        BYTE* dstp_uv = dst->GetWritePtr(plane);
-        for (size_t i = 0; i < nClips; ++i)
-        {
-          const BYTE* srcp = frames[i]->GetReadPtr(plane);
-          const int src_pitch = frames[i]->GetPitch(plane);
-          const int src_height = frames[i]->GetHeight(plane);
-
-          env->BitBlt(dstp_uv, dst_pitchUV, srcp, src_pitch, row_sizeUV, src_height);
-          dstp_uv += dst_pitchUV * src_height;
-        }
+      dstp = dst->GetWritePtr(plane);
+      for (const auto& src: frames)
+      {
+        const int src_height = src->GetHeight(plane);
+        env->BitBlt(dstp, dst_pitchUV, src->GetReadPtr(plane), src->GetPitch(plane), row_sizeUV, src_height);
+        dstp += dst_pitchUV * src_height;
       }
     }
   }
 
-  for (size_t i = 0; i < nClips; ++i)
-    frames[i] = nullptr;
-
   return dst;
 }
 
-AVSValue __cdecl StackVertical::Create(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue __cdecl StackVertical::Create(AVSValue args, void*, IScriptEnvironment* env)
 {
   if (args[1].IsArray()) {
     std::vector<PClip> children(1+args[1].ArraySize());
 
     children[0] = args[0].AsClip();
-    for (size_t i = 1; i < children.size(); ++i) // Copy clips
+    for (int i = 1; i < (int)children.size(); ++i) // Copy clips
       children[i] = args[1][i-1].AsClip();
 
     return new StackVertical(children, env);
@@ -175,7 +155,7 @@ AVSValue __cdecl StackVertical::Create(AVSValue args, void*, IScriptEnvironment*
   }
   else {
     env->ThrowError("StackVertical: clip array not recognized!");
-    return NULL;
+    return 0;
   }
 }
 
@@ -206,64 +186,52 @@ StackHorizontal::StackHorizontal(const std::vector<PClip>& child_array, IScriptE
   }
 }
 
-PVideoFrame __stdcall StackHorizontal::GetFrame(int n, IScriptEnvironment* env) 
+PVideoFrame __stdcall StackHorizontal::GetFrame(int n, IScriptEnvironment* env)
 {
-  const size_t nClips = children.size();
-  auto frames = static_cast<PVideoFrame*>(alloca(sizeof(PVideoFrame)*nClips));
+  std::vector<PVideoFrame> frames;
+  frames.reserve(children.size());
 
-  for (size_t i = 0; i < nClips; ++i) {
-    new(frames+i) PVideoFrame;
-    frames[i] = children[i]->GetFrame(n, env);
-  }
+  for (const auto& child : children)
+    frames.emplace_back(child->GetFrame(n, env));
 
   PVideoFrame dst = env->NewVideoFrame(vi);
   const int dst_pitch = dst->GetPitch();
   const int height = dst->GetHeight();
 
   BYTE* dstp = dst->GetWritePtr();
-  for (size_t i = 0; i < nClips; ++i)
+  for (const auto& src: frames)
   {
-    const BYTE* srcp = frames[i]->GetReadPtr();
-    const int src_pitch = frames[i]->GetPitch();
-    const int src_rowsize = frames[i]->GetRowSize();
-
-    env->BitBlt(dstp, dst_pitch, srcp, src_pitch, src_rowsize, height);
+    const int src_rowsize = src->GetRowSize();
+    env->BitBlt(dstp, dst_pitch, src->GetReadPtr(), src->GetPitch(), src_rowsize, height);
     dstp += src_rowsize;
   }
 
-  if (vi.IsPlanar() && !vi.IsY8()) {
+  if (vi.IsPlanar() && (vi.NumComponents() > 1)) {
     // Copy Planar
     const int dst_pitchUV = dst->GetPitch(PLANAR_U);
     const int heightUV = dst->GetHeight(PLANAR_U);
 
-    const static int planes[2] = { PLANAR_U, PLANAR_V };
-    for (int plane: planes) {
-      BYTE* dstp_uv = dst->GetWritePtr(plane);
-      for (size_t i = 0; i < nClips; ++i)
+    for (const int plane: { PLANAR_U, PLANAR_V }) {
+      dstp = dst->GetWritePtr(plane);
+      for (const auto& src: frames)
       {
-        const BYTE* srcp = frames[i]->GetReadPtr(plane);
-        const int src_pitch = frames[i]->GetPitch(plane);
-        const int src_width = frames[i]->GetRowSize(plane);
-
-        env->BitBlt(dstp_uv, dst_pitchUV, srcp, src_pitch, src_width, heightUV);
-        dstp_uv += src_width;
+        const int src_rowsize = src->GetRowSize(plane);
+        env->BitBlt(dstp, dst_pitchUV, src->GetReadPtr(plane), src->GetPitch(plane), src_rowsize, heightUV);
+        dstp += src_rowsize;
       }
     }
   }
 
-  for (size_t i = 0; i < nClips; ++i)
-    frames[i] = nullptr;
-
   return dst;
 }
 
-AVSValue __cdecl StackHorizontal::Create(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue __cdecl StackHorizontal::Create(AVSValue args, void*, IScriptEnvironment* env)
 {
   if (args[1].IsArray()) {
     std::vector<PClip> children(1+args[1].ArraySize());
 
     children[0] = args[0].AsClip();
-    for (size_t i = 1; i < children.size(); ++i) // Copy clips
+    for (int i = 1; i < (int)children.size(); ++i) // Copy clips
       children[i] = args[1][i-1].AsClip();
 
     return new StackHorizontal(children, env);
@@ -278,7 +246,7 @@ AVSValue __cdecl StackHorizontal::Create(AVSValue args, void*, IScriptEnvironmen
   }
   else {
     env->ThrowError("StackHorizontal: clip array not recognized!");
-    return NULL;
+    return 0;
   }
 }
 
@@ -342,7 +310,7 @@ PVideoFrame __stdcall ShowFiveVersions::GetFrame(int n, IScriptEnvironment* env)
     }
   }
 
-  for (int c=0; c<5; ++c) 
+  for (int c=0; c<5; ++c)
   {
     PVideoFrame src = child[c]->GetFrame(n, env);
     if (vi.IsPlanar()) {
@@ -380,7 +348,7 @@ PVideoFrame __stdcall ShowFiveVersions::GetFrame(int n, IScriptEnvironment* env)
       if (c&1)
         dstp2 += vi.BytesFromPixels(vi.width/6);
 
-    env->BitBlt(dstp2, dst_pitch, srcp, src_pitch, src_row_size, height);
+      env->BitBlt(dstp2, dst_pitch, srcp, src_pitch, src_row_size, height);
     }
   }
 
@@ -404,18 +372,19 @@ AVSValue __cdecl ShowFiveVersions::Create(AVSValue args, void*, IScriptEnvironme
 
 
 
+
 /**************************************
  *******   Animate (Recursive)   ******
  **************************************/
 
-Animate::Animate( PClip context, int _first, int _last, const char* _name, const AVSValue* _args_before, 
+Animate::Animate( PClip context, int _first, int _last, const char* _name, const AVSValue* _args_before,
                   const AVSValue* _args_after, int _num_args, bool _range_limit, IScriptEnvironment* env )
    : first(_first), last(_last), name(_name), num_args(_num_args), range_limit(_range_limit)
 {
-  if (first > last) 
+  if (first > last)
     env->ThrowError("Animate: final frame number must be greater than initial.");
 
-  if (first == last && (!range_limit)) 
+  if (first == last && (!range_limit))
     env->ThrowError("Animate: final frame cannot be the same as initial frame.");
 
   // check that argument types match
@@ -475,8 +444,8 @@ Animate::Animate( PClip context, int _first, int _last, const char* _name, const
 
     if (vi.width != vi1.width || vi.height != vi1.height)
       env->ThrowError("ApplyRange: Filtered and unfiltered video frame sizes must match");
-      
-    if (!vi.IsSameColorspace(vi1)) 
+
+    if (!vi.IsSameColorspace(vi1))
       env->ThrowError("ApplyRange: Filtered and unfiltered video colorspace must match");
   }
   else {
@@ -490,7 +459,7 @@ Animate::Animate( PClip context, int _first, int _last, const char* _name, const
 }
 
 
-bool __stdcall Animate::GetParity(int n) 
+bool __stdcall Animate::GetParity(int n)
 {
   if (range_limit) {
     if ((n<first) || (n>last)) {
@@ -505,7 +474,7 @@ bool __stdcall Animate::GetParity(int n)
 }
 
 
-PVideoFrame __stdcall Animate::GetFrame(int n, IScriptEnvironment* env) 
+PVideoFrame __stdcall Animate::GetFrame(int n, IScriptEnvironment* env)
 {
   if (range_limit) {
     if ((n<first) || (n>last)) {
@@ -541,7 +510,7 @@ PVideoFrame __stdcall Animate::GetFrame(int n, IScriptEnvironment* env)
   return cache[furthest]->GetFrame(n, env);
 }
 
-void __stdcall Animate::GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env)  { 
+void __stdcall Animate::GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env)  {
   if (range_limit) {  // Applyrange - hard switch between streams.
 
     const VideoInfo& vi1 = cache[0]->GetVideoInfo();
@@ -567,24 +536,24 @@ void __stdcall Animate::GetAudio(void* buf, __int64 start, __int64 count, IScrip
 
       // The bit in the middle
       const __int64 filt_count = (end_switch < start+count) ? (end_switch - start) : count;
-      cache[0]->GetAudio(buf, start, filt_count, env);  // Filtered 
+      cache[0]->GetAudio(buf, start, filt_count, env);  // Filtered
       start += filt_count;
       count -= filt_count;
       buf = (void*)( (BYTE*)buf + vi1.BytesFromAudioSamples(filt_count) );
 
       // The bit after
-      if (count > 0) 
+      if (count > 0)
         args_after[0].AsClip()->GetAudio(buf, start, count, env);  // UnFiltered
 
       return;
     }
     // Everything filtered
   }
-  cache[0]->GetAudio(buf, start, count, env);  // Filtered 
-} 
-  
+  cache[0]->GetAudio(buf, start, count, env);  // Filtered
+}
 
-AVSValue __cdecl Animate::Create(AVSValue args, void*, IScriptEnvironment* env) 
+
+AVSValue __cdecl Animate::Create(AVSValue args, void*, IScriptEnvironment* env)
 {
   PClip context;
   if (args[0].IsClip()) {
@@ -601,7 +570,7 @@ AVSValue __cdecl Animate::Create(AVSValue args, void*, IScriptEnvironment* env)
 }
 
 
-AVSValue __cdecl Animate::Create_Range(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue __cdecl Animate::Create_Range(AVSValue args, void*, IScriptEnvironment* env)
 {
   PClip context = args[0].AsClip();
 

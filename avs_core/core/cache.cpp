@@ -36,6 +36,7 @@
 #include "internal.h"
 #include "LruCache.h"
 #include <cassert>
+#include <cstdio>
 
 #ifdef X86_32
 #include <mmintrin.h>
@@ -72,6 +73,13 @@ struct CachePimpl
     SampleSize(0),
     MaxSampleCount(0)
   {
+    SampleSize = vi.BytesPerAudioSample();
+  }
+  ~CachePimpl()
+  {
+    if (AudioCache)
+      free(AudioCache);
+    AudioCache = NULL;
   }
 };
 
@@ -82,10 +90,12 @@ Cache::Cache(const PClip& _child, IScriptEnvironment* env) :
 {
   _pimpl = new CachePimpl(_child);
   env->ManageCache(MC_RegisterCache, reinterpret_cast<void*>(this));
+  _RPT5(0, "Cache::Cache registered. cache_id=%p child=%p w=%d h=%d VideoCacheSize=%Iu\n", (void *)this, (void *)_child, _pimpl->vi.width, _pimpl->vi.height, _pimpl->VideoCache->size()); // P.F.
 }
 
 Cache::~Cache()
 {
+  _RPT5(0, "Cache::Cache unregister. cache_id=%p child=%p w=%d h=%d VideoCacheSize=%Iu\n", (void *)this, (void *)_pimpl->child, _pimpl->vi.width, _pimpl->vi.height, _pimpl->VideoCache->size()); // P.F.
   Env->ManageCache(MC_UnRegisterCache, reinterpret_cast<void*>(this));
   delete _pimpl;
 }
@@ -103,34 +113,94 @@ PVideoFrame __stdcall Cache::GetFrame(int n, IScriptEnvironment* env)
   PVideoFrame result;
   LruCache<size_t, PVideoFrame>::handle cache_handle;
   
+#ifdef _DEBUG	
+  std::chrono::time_point<std::chrono::high_resolution_clock> t_start, t_end; 
+  t_start = std::chrono::high_resolution_clock::now(); // t_start starts in the constructor. Used in logging
+
+  LruLookupResult LruLookupRes = _pimpl->VideoCache->lookup(n, &cache_handle, true);
+  switch (LruLookupRes)
+#else
   switch(_pimpl->VideoCache->lookup(n, &cache_handle, true))
+#endif
   {
   case LRU_LOOKUP_NOT_FOUND:
     {
       try
       {
-        cache_handle.first->value = _pimpl->child->GetFrame(n, env);
+        //cache_handle.first->value = _pimpl->child->GetFrame(n, env);
+        result = _pimpl->child->GetFrame(n, env); // P.F. fill result immediately
+        cache_handle.first->value = result; // not after commit!
   #ifdef X86_32
         _mm_empty();
   #endif
         _pimpl->VideoCache->commit_value(&cache_handle);
       }
-      catch(...)
+      catch (...)
       {
         _pimpl->VideoCache->rollback(&cache_handle);
         throw;
       }
-      result = cache_handle.first->value;
+#ifdef _DEBUG	
+#define SLOW_READOUT_TEST
+  #ifdef SLOW_READOUT_TEST
+      // at threadcount==8, when the _RPT1 debug line (or similar time-consuming command) is present here
+      // random frame==NULL return -> 0xC0000005
+      // !!! some process during the next 1/10000 seconds is overwriting the content of this cache handle (frame) with NULL!
+      // 1/10000 sec delay, but a simple _RPT debug line is enough, albeit the corruption occurs more rarely
+      std::chrono::time_point<std::chrono::high_resolution_clock> t_start2, t_end2;
+      std::chrono::duration<double> elapsed_seconds;
+      t_start2 = std::chrono::high_resolution_clock::now();
+      do {
+        t_end2 = std::chrono::high_resolution_clock::now();
+        elapsed_seconds = t_end2 - t_start2;
+      } while (elapsed_seconds.count() < 1.0 / 10000.0);
+      // end of delay
+      //assert(NULL != cache_handle.first->value); // and now it's NULL!!!
+      assert(NULL != result); // but previously saved value is NOT NULL!!!
+      // P.F. debug lines to be removed when the NULL pointer frame problem is surely solved
+  #endif
+      t_end = std::chrono::high_resolution_clock::now();
+      elapsed_seconds = t_end - t_start;
+      std::string name = FuncName;
+      char buf[256];
+      if (NULL == cache_handle.first->value) {
+          _snprintf(buf, 255, "Cache::GetFrame LRU_LOOKUP_NOT_FOUND: HEY! got nulled! [%s] n=%6d child=%p frame=%p framebefore=%p SeekTimeWithGetFrame:%f\n", name.c_str(), n, (void *)_pimpl->child, (void *)cache_handle.first->value, (void *)result, elapsed_seconds.count()); // P.F.
+          _RPT0(0, buf);
+      } else {
+          _snprintf(buf, 255, "Cache::GetFrame LRU_LOOKUP_NOT_FOUND: [%s] n=%6d child=%p frame=%p framebefore=%p videoCacheSize=%zu SeekTimeWithGetFrame:%f\n", name.c_str(), n, (void *)_pimpl->child, (void *)cache_handle.first->value, (void *)result, _pimpl->VideoCache->size(), elapsed_seconds.count()); // P.F.
+          _RPT0(0, buf);
+      }
+#endif
+      // result = cache_handle.first->value; not here! 
+      // its content may change after commit when the last lock is released 
+      // (cache is being restructured by other threads, new frames, etc...)
       break;
     }
   case LRU_LOOKUP_FOUND_AND_READY:
     {
       result = cache_handle.first->value;
+#ifdef _DEBUG	
+      t_end = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> elapsed_seconds = t_end - t_start;
+      std::string name = FuncName;
+      char buf[256];
+      _snprintf(buf, 255, "Cache::GetFrame LRU_LOOKUP_FOUND_AND_READY: [%s] n=%6d child=%p frame=%p vfb=%p videoCacheSize=%zu SeekTime            :%f\n", name.c_str(), n, (void *)_pimpl->child, (void *)cache_handle.first->value, (void *)cache_handle.first->value->GetFrameBuffer(), _pimpl->VideoCache->size(), elapsed_seconds.count()); // P.F.
+      _RPT0(0, buf);
+      assert(result != NULL);
+#endif
       break;
     }
   case LRU_LOOKUP_NO_CACHE:
     {
       result = _pimpl->child->GetFrame(n, env);
+#ifdef _DEBUG	
+      t_end = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> elapsed_seconds = t_end - t_start;
+      std::string name = FuncName;
+      char buf[256];
+      _snprintf(buf, 255, "Cache::GetFrame LRU_LOOKUP_NO_CACHE: [%s] n=%6d child=%p frame=%p vfb=%p videoCacheSize=%zu SeekTime            :%f\n", name.c_str(), n, (void *)_pimpl->child, (void *)result, (void *)result->GetFrameBuffer(), _pimpl->VideoCache->size(), elapsed_seconds.count()); // P.F.
+      _RPT0(0, buf);
+#endif
       break;
     }
   case LRU_LOOKUP_FOUND_BUT_NOTAVAIL:    // Fall-through intentional
@@ -202,6 +272,7 @@ bool __stdcall Cache::GetParity(int n)
 
 int __stdcall Cache::SetCacheHints(int cachehints, int frame_range)
 {
+  _RPT3(0, "Cache::SetCacheHints called. cache=%p hint=%d frame_range=%d\n", (void *)this, cachehints, frame_range); // P.F.
   switch(cachehints)
   {
     /*********************************************
@@ -217,6 +288,9 @@ int __stdcall Cache::SetCacheHints(int cachehints, int frame_range)
 
     case CACHE_DONT_CACHE_ME:
       return 1;
+
+    case CACHE_GET_MTMODE:
+      return MT_NICE_FILTER;
 
     /*********************************************
         AVS 2.5 TRANSLATION
@@ -258,7 +332,7 @@ int __stdcall Cache::SetCacheHints(int cachehints, int frame_range)
     *********************************************/
 
     case CACHE_SET_MIN_CAPACITY:
-    { // This is not atomic, but rankly, we don't care
+    { // This is not atomic, but frankly, we don't care
       size_t min, max;
       _pimpl->VideoCache->limits(&min, &max);
       min = frame_range;
@@ -267,11 +341,12 @@ int __stdcall Cache::SetCacheHints(int cachehints, int frame_range)
     }
 
     case CACHE_SET_MAX_CAPACITY:
-    { // This is not atomic, but rankly, we don't care
+    { // This is not atomic, but frankly, we don't care
       size_t min, max;
       _pimpl->VideoCache->limits(&min, &max);
       max = frame_range;
       _pimpl->VideoCache->set_limits(min, max);
+      _RPT3(0, "Cache::SetCacheHints CACHE_SET_MAX_CAPACITY cache=%p hint=%d frame_range=%d\n", (void *)this, cachehints, frame_range); // P.F.
       break;
     }
 
@@ -279,24 +354,24 @@ int __stdcall Cache::SetCacheHints(int cachehints, int frame_range)
     {
       size_t min, max;
       _pimpl->VideoCache->limits(&min, &max);
-      return min;
+      return (int)min;
     }
 
     case CACHE_GET_MAX_CAPACITY:
     {
       size_t min, max;
       _pimpl->VideoCache->limits(&min, &max);
-      return max;
+      return (int)max;
     }
 
     case CACHE_GET_SIZE:
-      return _pimpl->VideoCache->size();
+      return (int)_pimpl->VideoCache->size();
       
     case CACHE_GET_REQUESTED_CAP:
-      return _pimpl->VideoCache->requested_capacity();
+      return (int)_pimpl->VideoCache->requested_capacity();
 
     case CACHE_GET_CAPACITY:
-      return _pimpl->VideoCache->capacity();
+      return (int)_pimpl->VideoCache->capacity();
 
     case CACHE_GET_WINDOW: // Get the current window h_span.
     case CACHE_GET_RANGE: // Get the current generic frame range.
@@ -356,7 +431,7 @@ int __stdcall Cache::SetCacheHints(int cachehints, int frame_range)
       return _pimpl->AudioPolicy;
 
     case CACHE_GET_AUDIO_SIZE: // Get the current audio cache size.
-      return _pimpl->SampleSize * _pimpl->MaxSampleCount;
+      return (int)(_pimpl->SampleSize * _pimpl->MaxSampleCount);
 
     case CACHE_PREFETCH_AUDIO_BEGIN:    // Begin queue request to prefetch audio (take critical section).
     case CACHE_PREFETCH_AUDIO_STARTLO:  // Set low 32 bits of start.

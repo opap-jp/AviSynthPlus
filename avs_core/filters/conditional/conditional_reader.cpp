@@ -153,18 +153,6 @@ iscomment(char *string)
 }
 
 
-// Helper function - exception protected wrapper
-
-inline AVSValue GetVar(IScriptEnvironment* env, const char* name) {
-  try {
-    return env->GetVar(name);
-  }
-  catch (const IScriptEnvironment::NotFound&) {}
-
-  return AVSValue();
-}
-
-
 // Reader ------------------------------------------------
 
 
@@ -293,7 +281,7 @@ ConditionalReader::ConditionalReader(PClip _child, const char* filename, const c
           AVSValue set_stop = ConvertType(stop_value, lines, env);
 
           const int range = stop-start;
-          const double diff = (double)(set_stop.AsFloat() - set_start.AsFloat()) / range;
+          const double diff = (set_stop.AsFloat() - set_start.AsFloat()) / range;
           for (int i = 0; i<=range; i++) {
             const double n = i * diff + set_start.AsFloat();
             SetFrame(i+start, (mode == MODE_FLOAT)
@@ -428,7 +416,7 @@ void ConditionalReader::SetRange(int start_frame, int stop_frame, AVSValue v) {
       }
       break;
     case MODE_FLOAT:
-      q = (float)v.AsFloat();
+      q = v.AsFloatf();
       for (i = start_frame; i <= stop_frame; i++) {
         floatVal[i] = q;
       }
@@ -460,7 +448,7 @@ void ConditionalReader::SetFrame(int framenumber, AVSValue v) {
       intVal[framenumber+offset] = v.AsInt();
       break;
     case MODE_FLOAT:
-      floatVal[framenumber+offset] = (float)v.AsFloat();
+      floatVal[framenumber+offset] = v.AsFloatf();
       break;
     case MODE_BOOL:
       boolVal[framenumber+offset] = v.AsBool();
@@ -586,8 +574,8 @@ Write::Write (PClip _child, const char* _filename, AVSValue args, int _linecheck
 	}
 
 	if (linecheck == -1) {	//write at start
-		AVSValue prev_last = env->GetVar("last");  // Store previous last
-		AVSValue prev_current_frame = GetVar(env, "current_frame");  // Store previous current_frame
+		AVSValue prev_last = env->GetVarDef("last");  // Store previous last
+		AVSValue prev_current_frame = env->GetVarDef("current_frame");  // Store previous current_frame
 
 		env->SetVar("last", (AVSValue)child);       // Set implicit last
 		env->SetVar("current_frame", -1);
@@ -598,8 +586,8 @@ Write::Write (PClip _child, const char* _filename, AVSValue args, int _linecheck
 		env->SetVar("current_frame", prev_current_frame);       // Restore current_frame
 	}
 	if (linecheck == -2) {	//write at end, evaluate right now
-		AVSValue prev_last = env->GetVar("last");  // Store previous last
-		AVSValue prev_current_frame = GetVar(env, "current_frame");  // Store previous current_frame
+		AVSValue prev_last = env->GetVarDef("last");  // Store previous last
+		AVSValue prev_current_frame = env->GetVarDef("current_frame");  // Store previous current_frame
 
 		env->SetVar("last", (AVSValue)child);       // Set implicit last
 		env->SetVar("current_frame", -2);
@@ -619,8 +607,8 @@ PVideoFrame __stdcall Write::GetFrame(int n, IScriptEnvironment* env) {
 
 	if (linecheck<0) return tmpframe;	//do nothing here when writing only start or end
 
-	AVSValue prev_last = env->GetVar("last");  // Store previous last
-	AVSValue prev_current_frame = GetVar(env, "current_frame");  // Store previous current_frame
+	AVSValue prev_last = env->GetVarDef("last");  // Store previous last
+	AVSValue prev_current_frame = env->GetVarDef("current_frame");  // Store previous current_frame
 
 	env->SetVar("last",(AVSValue)child);       // Set implicit last (to avoid recursive stack calls?)
 	env->SetVar("current_frame",n);

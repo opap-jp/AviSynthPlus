@@ -37,6 +37,29 @@
 #include "AVIReadHandler.h"
 
 
+// AVI Decompressors require 4bytes aligned buffer with minimum padding or no padding buffer.
+// Therefore, PVideoFrame shouldn't be used as those.
+
+class TemporalBuffer {
+  void* orig;
+  BYTE* pY;
+  BYTE* pV;
+  BYTE* pU;
+  int pitchY;
+  int pitchUV;
+  size_t size;
+public:
+  TemporalBuffer(const VideoInfo& vi, bool bMediaPad, IScriptEnvironment* env);
+  ~TemporalBuffer() {}
+  int GetPitch(int plane=PLANAR_Y) { return (plane == PLANAR_Y) ? pitchY : pitchUV; }
+  size_t GetSize() { return size; }
+  BYTE* GetPtr(int plane=PLANAR_Y)
+  {
+    switch (plane) { case PLANAR_U: return pU; case PLANAR_V: return pV; default: return pY; }
+  }
+};
+
+
 class AVISource : public IClip {
   IAVIReadHandler *pfile;
   IAVIReadStream *pvideo;
@@ -57,9 +80,10 @@ class AVISource : public IClip {
   AudioSource* aSrc;
   AudioStreamSource* audioStreamSource;
   __int64 audio_stream_pos;
+  TemporalBuffer* frame;
 
   LRESULT DecompressBegin(LPBITMAPINFOHEADER lpbiSrc, LPBITMAPINFOHEADER lpbiDst);
-  LRESULT DecompressFrame(int n, bool preroll, PVideoFrame &frame, IScriptEnvironment* env);
+  LRESULT DecompressFrame(int n, bool preroll, IScriptEnvironment* env);
 
   void CheckHresult(HRESULT hr, const char* msg, IScriptEnvironment* env);
   bool AttemptCodecNegotiation(DWORD fccHandler, BITMAPINFOHEADER* bmih);
@@ -67,15 +91,15 @@ class AVISource : public IClip {
 
 public:
 
-  enum {
+  typedef enum {
     MODE_NORMAL = 0,
     MODE_AVIFILE,
     MODE_OPENDML,
     MODE_WAV
-  };
+  } avi_mode_e;
 
   AVISource(const char filename[], bool fAudio, const char pixel_type[],
-            const char fourCC[], int vtrack, int atrack, int mode, IScriptEnvironment* env);  // mode: 0=detect, 1=avifile, 2=opendml, 3=avifile (audio only)
+            const char fourCC[], int vtrack, int atrack, avi_mode_e mode, IScriptEnvironment* env);  // mode: 0=detect, 1=avifile, 2=opendml, 3=avifile (audio only)
   ~AVISource();
   void CleanUp(); // Tritical - Jan 2006
   const VideoInfo& __stdcall GetVideoInfo();
@@ -85,7 +109,7 @@ public:
   int __stdcall SetCacheHints(int cachehints,int frame_range);
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-    const int mode = int(user_data);
+    const avi_mode_e mode = (avi_mode_e)size_t(user_data);
     const bool fAudio = (mode == MODE_WAV) || args[1].AsBool(true);
     const char* pixel_type = (mode != MODE_WAV) ? args[2].AsString("") : "";
     const char* fourCC = (mode != MODE_WAV) ? args[3].AsString("") : "";

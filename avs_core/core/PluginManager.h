@@ -6,14 +6,18 @@
 #include <vector>
 #include "internal.h"
 
-class IScriptEnvironment2;
+class InternalEnvironment;
 struct PluginFile;
 
 struct StdStriComparer
 {
   bool operator() (const std::string& lhs, const std::string& rhs) const
   {
+#if defined(MSVC)
     return (_strcmpi(lhs.c_str(), rhs.c_str()) < 0);
+#else
+    return (strcasecmp(lhs.c_str(), rhs.c_str()) < 0);
+#endif
   }
 };
 
@@ -22,7 +26,7 @@ typedef std::map<std::string,FunctionList,StdStriComparer> FunctionMap;
 class PluginManager
 {
 private:
-  IScriptEnvironment2 *Env;
+  InternalEnvironment *Env;
   PluginFile *PluginInLoad;
   std::vector<std::string> AutoloadDirs;
   std::vector<PluginFile> AutoLoadedImports;
@@ -37,7 +41,7 @@ private:
   bool TryAsAvs25(PluginFile &plugin, AVSValue *result);
   bool TryAsAvsC(PluginFile &plugin, AVSValue *result);
   void UpdateFunctionExports(const char* funcName, const char* funcParams, const char *exportVar);
-  
+
   const AVSFunction* Lookup(const FunctionMap& map,
     const char* search_name,
     const AVSValue* args,
@@ -48,7 +52,7 @@ private:
 
 
 public:
-  PluginManager(IScriptEnvironment2* env);
+  PluginManager(InternalEnvironment* env);
   ~PluginManager();
 
   void ClearAutoloadDirs();

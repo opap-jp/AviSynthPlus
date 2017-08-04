@@ -6,18 +6,19 @@
 #include "vartable.h"
 #include "ThreadPool.h"
 #include "BufferPool.h"
+#include "InternalEnvironment.h"
 
-class ScriptEnvironmentTLS : public IScriptEnvironment2
+class ScriptEnvironmentTLS : public InternalEnvironment
 {
 private:
-  IScriptEnvironment2 *core;
+  InternalEnvironment *core;
   const size_t thread_id;
   VarTable* global_var_table;
   VarTable* var_table;
   BufferPool BufferPool;
 
 public:
-  ScriptEnvironmentTLS(size_t _thread_id) : 
+  ScriptEnvironmentTLS(size_t _thread_id) :
     core(NULL),
     thread_id(_thread_id),
     global_var_table(NULL),
@@ -37,7 +38,7 @@ public:
       PopContextGlobal();
   }
 
-  void Specialize(IScriptEnvironment2* _core)
+  void Specialize(InternalEnvironment* _core)
   {
     core = _core;
   }
@@ -89,6 +90,15 @@ public:
     return true;
   }
 
+  AVSValue __stdcall GetVarDef(const char* name, const AVSValue& def)
+  {
+      AVSValue val;
+      if (this->GetVar(name, &val))
+          return val;
+      else
+          return def;
+  }
+
   bool __stdcall GetVar(const char* name, bool def) const
   {
     AVSValue val;
@@ -98,7 +108,7 @@ public:
       return def;
   }
 
-  int __stdcall GetVar(const char* name, int def) const 
+  int __stdcall GetVar(const char* name, int def) const
   {
     AVSValue val;
     if (this->GetVar(name, &val))
@@ -260,7 +270,7 @@ public:
     core->ThrowError("Cannot delete environment from a TLS proxy.");
   }
 
-  void _stdcall ApplyMessage(PVideoFrame* frame, const VideoInfo& vi, const char* message, int size, int textcolor, int halocolor, int bgcolor)
+  void __stdcall ApplyMessage(PVideoFrame* frame, const VideoInfo& vi, const char* message, int size, int textcolor, int halocolor, int bgcolor)
   {
     core->ApplyMessage(frame, vi, message, size, textcolor, halocolor, bgcolor);
   }
@@ -332,6 +342,11 @@ public:
     return core->GetFilterMTMode(filter, is_forced);
   }
 
+  bool __stdcall FilterHasMtMode(const AVSFunction* filter) const
+  {
+    return core->FilterHasMtMode(filter);
+  }
+
   virtual IJobCompletion* __stdcall NewCompletion(size_t capacity)
   {
     return core->NewCompletion(capacity);
@@ -347,6 +362,45 @@ public:
     core->SetPrefetcher(p);
   }
 
+  virtual ClipDataStore* __stdcall ClipData(IClip *clip)
+  {
+    return core->ClipData(clip);
+  }
+
+  virtual MtMode __stdcall GetDefaultMtMode() const
+  {
+    return core->GetDefaultMtMode();
+  }
+
+  virtual void __stdcall SetLogParams(const char *target, int level)
+  {
+    core->SetLogParams(target, level);
+  }
+
+  virtual void __stdcall LogMsg(int level, const char* fmt, ...)
+  {
+    va_list val;
+    va_start(val, fmt);
+    core->LogMsg_valist(level, fmt, val);
+    va_end(val);
+  }
+  virtual void __stdcall LogMsg_valist(int level, const char* fmt, va_list va)
+  {
+    core->LogMsg_valist(level, fmt, va);
+  }
+
+  virtual void __stdcall LogMsgOnce(const OneTimeLogTicket &ticket, int level, const char* fmt, ...)
+  {
+    va_list val;
+    va_start(val, fmt);
+    core->LogMsgOnce_valist(ticket, level, fmt, val);
+    va_end(val);
+  }
+
+  virtual void __stdcall LogMsgOnce_valist(const OneTimeLogTicket &ticket, int level, const char* fmt, va_list va)
+  {
+    core->LogMsgOnce_valist(ticket, level, fmt, va);
+  }
 
 };
 

@@ -37,10 +37,12 @@
 #define __Internal_H__
 
 #include <avs/config.h>
+#include <avs/minmax.h>
+#include <stdint.h>
 #include "version.h"
 
 #define AVS_CLASSIC_VERSION 2.60  // Note: Used by VersionNumber() script function
-#define AVS_COPYRIGHT "\n\xA9 2000-2015 Ben Rudiak-Gould, et al.\nhttp://avisynth.nl\n\xA9 2013-2015 AviSynth+ Project\nhttp://avs-plus.net"
+#define AVS_COPYRIGHT "\n\xA9 2000-2015 Ben Rudiak-Gould, et al.\nhttp://avisynth.nl\n\xA9 2013-2016 AviSynth+ Project\nhttp://avs-plus.net"
 #define BUILTIN_FUNC_PREFIX "AviSynth"
 
 enum MANAGE_CACHE_KEYS
@@ -67,10 +69,12 @@ public:
   char* canon_name;
   char* param_types;
   void* user_data;
+  char* dll_path;
 
   AVSFunction(void*);
   AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply);
   AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply, void *_user_data);
+  AVSFunction(const char* _name, const char* _plugin_basename, const char* _param_types, apply_func_t _apply, void *_user_data, const char* _dll_path);
   ~AVSFunction();
 
   AVSFunction() = delete;
@@ -169,9 +173,14 @@ public:
 
 
 static __inline BYTE ScaledPixelClip(int i) {
-  return PixelClip((i+32768) >> 16);
+  // return PixelClip((i+32768) >> 16);
+  // PF: clamp is faster than lut
+  return (uint8_t)clamp((i + 32768) >> 16, 0, 255);
 }
 
+static __inline uint16_t ScaledPixelClip(__int64 i) {
+    return (uint16_t)clamp((i + 32768) >> 16, 0LL, 65535LL);
+}
 
 static __inline bool IsClose(int a, int b, unsigned threshold) 
   { return (unsigned(a-b+threshold) <= threshold*2); }

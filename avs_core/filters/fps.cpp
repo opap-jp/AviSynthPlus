@@ -142,7 +142,7 @@ static bool reduce_float(float value, unsigned &num, unsigned &den)
   uint32_t a2, ax, amin;  // integer parts of quotients
   uint32_t f1 = 0, f2;    // fractional parts of quotients
 
-  while (1)  // calculate convergents
+  for (;;)  // calculate convergents
   {
     a2 = nx / dx;
     f2 = nx % dx;
@@ -222,7 +222,7 @@ static void reduce_frac(uint32_t &num, uint32_t &den, uint32_t limit)
   uint32_t f1 = 0, f2;        // fractional parts of quotients
   int i = 0;  // number of loop iterations
 
-  while (1) { // calculate convergents
+  for (;;) { // calculate convergents
     a2 = nx / dx;
     f2 = nx % dx;
     n2 = n0 + n1 * a2;
@@ -272,7 +272,7 @@ AVSValue __cdecl ContinuedCreate(AVSValue args, void* key, IScriptEnvironment* e
       num = args[0].AsInt();
     } else { // IsFloat
       num = (uint32_t)args[0].AsFloat();
-      if ((float)num != (float)args[0].AsFloat()) {
+      if ((float)num != args[0].AsFloatf()) {
         env->ThrowError("ContinuedFraction: Numerator must be an integer.\n");
       }
     }
@@ -280,12 +280,12 @@ AVSValue __cdecl ContinuedCreate(AVSValue args, void* key, IScriptEnvironment* e
     reduce_frac(num, den, (uint32_t)args[2].AsInt(1001));
   } else { // float[, limit] form
     if (args[2].IsInt()) {
-      if (float_to_frac((float)args[0].AsFloat(), num, den)) {
+      if (float_to_frac(args[0].AsFloatf(), num, den)) {
         env->ThrowError("ContinuedFraction: Float value out of range for rational pair.\n");
       }
       reduce_frac(num, den, (uint32_t)args[2].AsInt());
     } else {
-      if (reduce_float((float)args[0].AsFloat(), num, den)) {
+      if (reduce_float(args[0].AsFloatf(), num, den)) {
         env->ThrowError("ContinuedFraction: Float value out of range for rational pair.\n");
       }
     }
@@ -340,8 +340,7 @@ void FloatToFPS(const char *name, float n, uint32_t &num, uint32_t &den, IScript
 
 void PresetToFPS(const char *name, const char *p, uint32_t &num, uint32_t &den, IScriptEnvironment* env)
 {
-	if (0) { ; }
-	else if (lstrcmpi(p, "ntsc_film"        ) == 0) { num = 24000; den = 1001; }
+	if (lstrcmpi(p, "ntsc_film"        ) == 0) { num = 24000; den = 1001; }
 	else if (lstrcmpi(p, "ntsc_video"       ) == 0) { num = 30000; den = 1001; }
 	else if (lstrcmpi(p, "ntsc_double"      ) == 0) { num = 60000; den = 1001; }
 	else if (lstrcmpi(p, "ntsc_quad"        ) == 0) { num =120000; den = 1001; }
@@ -458,7 +457,7 @@ AVSValue __cdecl AssumeFPS::CreateFloat(AVSValue args, void*, IScriptEnvironment
 {
   uint32_t num, den;
 
-	FloatToFPS("AssumeFPS", (float)args[1].AsFloat(), num, den, env);
+	FloatToFPS("AssumeFPS", args[1].AsFloatf(), num, den, env);
 	return new AssumeFPS(args[0].AsClip(), num, den, args[2].AsBool(false), env);
 }
 
@@ -547,7 +546,7 @@ AVSValue __cdecl ChangeFPS::CreateFloat(AVSValue args, void*, IScriptEnvironment
 {
   uint32_t num, den;
 
-	FloatToFPS("ChangeFPS", (float)args[1].AsFloat(), num, den, env);
+	FloatToFPS("ChangeFPS", args[1].AsFloatf(), num, den, env);
 	return new ChangeFPS(args[0].AsClip(), num, den, args[2].AsBool(true), env);
 }
 
@@ -656,7 +655,7 @@ PVideoFrame __stdcall ConvertFPS::GetFrame(int n, IScriptEnvironment* env)
 
 			for (int y = 0; y < height; y++) {
 				for (int x = 0; x < row_size; x++)
-					a_data[x] += ((b_data[x] - a_data[x]) * mix_ratio + half) >> resolution;
+					a_data[x] = a_data[x] + BYTE(((b_data[x] - a_data[x]) * mix_ratio + half) >> resolution);
 				a_data += a_pitch;
 				b_data += b_pitch;
 			}
@@ -702,7 +701,7 @@ PVideoFrame __stdcall ConvertFPS::GetFrame(int n, IScriptEnvironment* env)
 		BYTE* data   = d->GetWritePtr();
 		const int      pitch  = d->GetPitch();
 		if( top > 0 )
-			BitBlt( data, pitch, a_data, a_pitch, row_size, top );
+			env->BitBlt( data, pitch, a_data, a_pitch, row_size, top );
 loop:
 		bottom = min( switch_line + (zone>>1), height );
 		int safe_top = max(top,0);
@@ -712,7 +711,7 @@ loop:
 		for( int y = safe_top; y < bottom; y++ ) {
 			int scale = y - top;
 			for( int x = 0; x < row_size; x++ )
-				pd[x] = pa[x] + ((pb[x] - pa[x]) * scale + (zone>>1)) / zone;
+				pd[x] = BYTE(pa[x] + ((pb[x] - pa[x]) * scale + (zone>>1)) / zone);
 			pd += pitch;
 			pa += a_pitch;
 			pb += b_pitch;
@@ -723,7 +722,7 @@ loop:
 		if( bottom < limit ) {
 			pd = data   + bottom * pitch;
 			pb = b_data + bottom * b_pitch;
-			BitBlt( pd, pitch, pb, b_pitch, row_size, limit-bottom );
+			env->BitBlt( pd, pitch, pb, b_pitch, row_size, limit-bottom );
 		}
 		if( top < height ) {
 			nsrc++;

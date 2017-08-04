@@ -1,4 +1,4 @@
-/******************************************************
+ï»¿/******************************************************
   A fast and high quality sampling rate converter SSRC
                                            written by Naoki Shibata
 
@@ -8,12 +8,13 @@ e-mail   : shibatch@users.sourceforge.net
 
 Some changes are:
 
-Copyright © 2001-2003, Peter Pawlowski
+Copyright (c) 2001-2003, Peter Pawlowski
 All rights reserved.
 
 *******************************************************/
 
 #include "ssrc.h"
+#include <avs/alignment.h>
 #include <cassert>
 
 #pragma warning(disable:4244)
@@ -37,7 +38,7 @@ protected:
 
 #define RINT(x) ((x) >= 0 ? ((int)((x) + 0.5)) : ((int)((x) - 0.5)))
 
-extern "C" 
+extern "C"
 {
 extern double dbesi0(double);
 }
@@ -212,14 +213,12 @@ class Upsampler : public Resampler_i_base<REAL>
   int i,j;
 
 		int n2b2;//=n2b/2;
-		int rp;        // inbuf‚Ìfs1‚Å‚ÌŸ‚É“Ç‚ŞƒTƒ“ƒvƒ‹‚ÌêŠ‚ğ•Û
-		int ds;        // Ÿ‚Édispose‚·‚ésfrq‚Å‚ÌƒTƒ“ƒvƒ‹”
-		int nsmplwrt1; // ÀÛ‚Éƒtƒ@ƒCƒ‹‚©‚çinbuf‚É“Ç‚İ‚Ü‚ê‚½’l‚©‚çŒvZ‚µ‚½
-					   // stage2 filter‚É“n‚³‚ê‚éƒTƒ“ƒvƒ‹”
-		int nsmplwrt2; // ÀÛ‚Éƒtƒ@ƒCƒ‹‚©‚çinbuf‚É“Ç‚İ‚Ü‚ê‚½’l‚©‚çŒvZ‚µ‚½
-					   // stage2 filter‚É“n‚³‚ê‚éƒTƒ“ƒvƒ‹”
-		int s1p;       // stage1 filter‚©‚ço—Í‚³‚ê‚½ƒTƒ“ƒvƒ‹‚Ì”‚ğn1y*osf‚ÅŠ„‚Á‚½—]‚è
-		int init;
+		int rp;        // keep the location of the next samples to read in inbuf at fs1.
+		int ds;        // number of samples to dispose next in sfrq.
+		int nsmplwrt1; // actually number of samples to send stage2 filters .
+		int nsmplwrt2; // actually number of samples to send stage2 filters .
+		int s1p;       // the reminder obtained by dividing the samples output from stage1 filter by n1y*osf.
+    int init;
 		unsigned int sumread,sumwrite;
 		int osc;
 		REAL *ip,*ip_backup;
@@ -278,20 +277,20 @@ public:
 		n1y = fs1/sfrq;
 		n1x = n1/n1y+1;
 
-		f1order = (int*)_aligned_malloc(sizeof(int)*n1y*osf, 64);
+		f1order = (int*)avs_malloc(sizeof(int)*n1y*osf, 64);
 		for(i=0;i<n1y*osf;i++) {
 		  f1order[i] = fs1/sfrq-(i*(fs1/(dfrq*osf)))%(fs1/sfrq);
 		  if (f1order[i] == fs1/sfrq) f1order[i] = 0;
 		}
 
-		f1inc = (int*)_aligned_malloc(sizeof(int)*n1y*osf, 64);
+		f1inc = (int*)avs_malloc(sizeof(int)*n1y*osf, 64);
 		for(i=0;i<n1y*osf;i++) {
 		  f1inc[i] = f1order[i] < fs1/(dfrq*osf) ? nch : 0;
 		  if (f1order[i] == fs1/sfrq) f1order[i] = 0;
 		}
 
-		stage1 = (REAL**)_aligned_malloc(sizeof(REAL *)*n1y, 64);
-		stage1[0] = (REAL*)_aligned_malloc(sizeof(REAL)*n1x*n1y, 64);
+		stage1 = (REAL**)avs_malloc(sizeof(REAL *)*n1y, 64);
+		stage1[0] = (REAL*)avs_malloc(sizeof(REAL)*n1x*n1y, 64);
 
 		for(i=1;i<n1y;i++) {
 		  stage1[i] = &(stage1[0][n1x*i]);
@@ -332,7 +331,7 @@ public:
 		for(n2b=1;n2b<n2;n2b*=2);
 		n2b *= 2;
 
-		stage2 = (REAL*)_aligned_malloc(sizeof(REAL)*n2b, 64);
+		stage2 = (REAL*)avs_malloc(sizeof(REAL)*n2b, 64);
 
 		for(i=0;i<n2b;i++) stage2[i] = 0;
 
@@ -341,10 +340,10 @@ public:
 		}
 
 		ipsize    = 2+sqrt((double)n2b);
-		fft_ip    = (int*)_aligned_malloc(sizeof(int)*ipsize, 64);
+		fft_ip    = (int*)avs_malloc(sizeof(int)*ipsize, 64);
 		fft_ip[0] = 0;
 		wsize     = n2b/2;
-		fft_w     = (REAL*)_aligned_malloc(sizeof(REAL)*wsize, 64);
+		fft_w     = (REAL*)avs_malloc(sizeof(REAL)*wsize, 64);
 
 		fft<REAL>::rdft(n2b,1,stage2,fft_ip,fft_w);
 	  }
@@ -352,19 +351,19 @@ public:
 //	  delay=0;
 	  n2b2=n2b/2;
 
-		buf1 = (REAL**)_aligned_malloc(sizeof(REAL *)*nch, 64);
+		buf1 = (REAL**)avs_malloc(sizeof(REAL *)*nch, 64);
 		for(i=0;i<nch;i++)
 		  {
-		buf1[i] = (REAL*)_aligned_malloc(sizeof(REAL)*(n2b2/osf+1), 64);
+		buf1[i] = (REAL*)avs_malloc(sizeof(REAL)*(n2b2/osf+1), 64);
 		for(j=0;j<(n2b2/osf+1);j++) buf1[i][j] = 0;
 		  }
 
-		buf2 = (REAL**)_aligned_malloc(sizeof(REAL *)*nch, 64);
-		for(i=0;i<nch;i++) buf2[i] = (REAL*)_aligned_malloc(sizeof(REAL)*n2b, 64);
+		buf2 = (REAL**)avs_malloc(sizeof(REAL *)*nch, 64);
+		for(i=0;i<nch;i++) buf2[i] = (REAL*)avs_malloc(sizeof(REAL)*n2b, 64);
 
 
-		inbuf  = (REAL*)_aligned_malloc(nch*(n2b2+n1x)*sizeof(REAL), 64);
-		outbuf = (REAL*)_aligned_malloc(sizeof(REAL)*nch*(n2b2/osf+1), 64);
+		inbuf  = (REAL*)avs_malloc(nch*(n2b2+n1x)*sizeof(REAL), 64);
+		outbuf = (REAL*)avs_malloc(sizeof(REAL)*nch*(n2b2/osf+1), 64);
 
 		s1p = 0;
 		rp  = 0;
@@ -403,7 +402,7 @@ public:
 			nsmplread=in_size/nch;
 			rv=nsmplread*nch;
 		}
-		
+
 		make_inbuf(nsmplread,inbuflen,rawinbuf,inbuf,toberead);
 
 		inbuflen += toberead2;
@@ -445,7 +444,7 @@ public:
 				  stage1[s1o][4] * *(ip+4*nch)+
 				  stage1[s1o][5] * *(ip+5*nch)+
 				  stage1[s1o][6] * *(ip+6*nch);
-				
+
 				ip += f1inc[s1p];
 
 				s1p++;
@@ -468,7 +467,7 @@ public:
 				  stage1[s1o][6] * *(ip+6*nch)+
 				  stage1[s1o][7] * *(ip+7*nch)+
 				  stage1[s1o][8] * *(ip+8*nch);
-				
+
 				ip += f1inc[s1p];
 
 				s1p++;
@@ -511,7 +510,7 @@ public:
 
 
 			buf2[ch][0] = stage2[0]*buf2[ch][0];
-			buf2[ch][1] = stage2[1]*buf2[ch][1]; 
+			buf2[ch][1] = stage2[1]*buf2[ch][1];
 
 
 
@@ -596,19 +595,19 @@ public:
 
 	~Upsampler()
 	{
-	  _aligned_free(f1order);
-	  _aligned_free(f1inc);
-	  _aligned_free(stage1[0]);
-	  _aligned_free(stage1);
-	  _aligned_free(stage2);
-	  _aligned_free(fft_ip);
-	  _aligned_free(fft_w);
-	  for(i=0;i<nch;i++) _aligned_free(buf1[i]);
-	  _aligned_free(buf1);
-	  for(i=0;i<nch;i++) _aligned_free(buf2[i]);
-	  _aligned_free(buf2);
-	  _aligned_free(inbuf);
-	  _aligned_free(outbuf);
+	  avs_free(f1order);
+	  avs_free(f1inc);
+	  avs_free(stage1[0]);
+	  avs_free(stage1);
+	  avs_free(stage2);
+	  avs_free(fft_ip);
+	  avs_free(fft_w);
+	  for(i=0;i<nch;i++) avs_free(buf1[i]);
+	  avs_free(buf1);
+	  for(i=0;i<nch;i++) avs_free(buf2[i]);
+	  avs_free(buf2);
+	  avs_free(inbuf);
+	  avs_free(outbuf);
 	  //free(rawoutbuf);
 	}
 };
@@ -634,16 +633,15 @@ private:
 
 
     int n1b2;// = n1b/2;
-    int rp;        // inbuf‚Ìfs1‚Å‚ÌŸ‚É“Ç‚ŞƒTƒ“ƒvƒ‹‚ÌêŠ‚ğ•Û
-    int rps;       // rp‚ğ(fs1/sfrq=osf)‚ÅŠ„‚Á‚½—]‚è
-    int rp2;       // buf2‚Ìfs2‚Å‚ÌŸ‚É“Ç‚ŞƒTƒ“ƒvƒ‹‚ÌêŠ‚ğ•Û
-    int ds;        // Ÿ‚Édispose‚·‚ésfrq‚Å‚ÌƒTƒ“ƒvƒ‹”
-    int nsmplwrt2; // ÀÛ‚Éƒtƒ@ƒCƒ‹‚©‚çinbuf‚É“Ç‚İ‚Ü‚ê‚½’l‚©‚çŒvZ‚µ‚½
-                   // stage2 filter‚É“n‚³‚ê‚éƒTƒ“ƒvƒ‹”
-    int s2p;       // stage1 filter‚©‚ço—Í‚³‚ê‚½ƒTƒ“ƒvƒ‹‚Ì”‚ğn1y*osf‚ÅŠ„‚Á‚½—]‚è
+    int rp;        // keep the location of the next samples to read in inbuf at fs1.
+    int rps;       // the reminder obtained by dividing rp by (fs1/sfrq=osf).
+    int rp2;       // keep the location of the next samples to read in buf2 at fs2.
+    int ds;        // the number of samples to dispose next in sfrq.
+    int nsmplwrt2; // actually number of samples to send stage2 filter .
+    int s2p;       // the reminder obtained by dividing the samples output from stage1 filter by n1y*osf.
     int init,ending;
     int osc;
-    REAL *bp; // rp2‚©‚çŒvZ‚³‚ê‚éDbuf2‚ÌŸ‚É“Ç‚ŞƒTƒ“ƒvƒ‹‚ÌˆÊ’u
+    REAL *bp; // the location of the next samples to read calculated with rp2
     int rps_backup,s2p_backup;
     int k,ch,p;
     int inbuflen;//=0;
@@ -705,7 +703,7 @@ public:
     for(n1b=1;n1b<n1;n1b*=2);
     n1b *= 2;
 
-    stage1 = (REAL*)_aligned_malloc(sizeof(REAL)*n1b, 64);
+    stage1 = (REAL*)avs_malloc(sizeof(REAL)*n1b, 64);
 
     for(i=0;i<n1b;i++) stage1[i] = 0;
 
@@ -714,10 +712,10 @@ public:
     }
 
     ipsize    = 2+sqrt((double)n1b);
-    fft_ip    = (int*)_aligned_malloc(sizeof(int)*ipsize, 64);
+    fft_ip    = (int*)avs_malloc(sizeof(int)*ipsize, 64);
     fft_ip[0] = 0;
     wsize     = n1b/2;
-    fft_w     = (REAL*)_aligned_malloc(sizeof(REAL)*wsize, 64);
+    fft_w     = (REAL*)avs_malloc(sizeof(REAL)*wsize, 64);
 
     fft<REAL>::rdft(n1b,1,stage1,fft_ip,fft_w);
   }
@@ -728,12 +726,12 @@ public:
     fs2 = sfrq/frqgcd*dfrq;
     n2 = 1;
     n2y = n2x = 1;
-    f2order = (int*)_aligned_malloc(sizeof(int)*n2y, 64);
+    f2order = (int*)avs_malloc(sizeof(int)*n2y, 64);
     f2order[0] = 0;
-    f2inc = (int*)_aligned_malloc(sizeof(int)*n2y, 64);
+    f2inc = (int*)avs_malloc(sizeof(int)*n2y, 64);
     f2inc[0] = sfrq/dfrq;
-    stage2 = (REAL**)_aligned_malloc(sizeof(REAL *)*n2y, 64);
-    stage2[0] = (REAL*)_aligned_malloc(sizeof(REAL)*n2x*n2y, 64);
+    stage2 = (REAL**)avs_malloc(sizeof(REAL *)*n2y, 64);
+    stage2[0] = (REAL*)avs_malloc(sizeof(REAL)*n2x*n2y, 64);
     stage2[0][0] = 1;
   } else {
     double aa = AA; /* stop band attenuation(dB) */
@@ -754,23 +752,23 @@ public:
     alp = alpha(aa);
     iza = dbesi0(alp);
 
-    n2y = fs2/fs1; // 0‚Å‚È‚¢ƒTƒ“ƒvƒ‹‚ªfs2‚Å‰½ƒTƒ“ƒvƒ‹‚¨‚«‚É‚ ‚é‚©H
+    n2y = fs2/fs1; // The interval where the sample which isn't 0 in fs2 exists.
     n2x = n2/n2y+1;
 
-    f2order = (int*)_aligned_malloc(sizeof(int)*n2y, 64);
+    f2order = (int*)avs_malloc(sizeof(int)*n2y, 64);
     for(i=0;i<n2y;i++) {
       f2order[i] = fs2/fs1-(i*(fs2/dfrq))%(fs2/fs1);
       if (f2order[i] == fs2/fs1) f2order[i] = 0;
     }
 
-    f2inc = (int*)_aligned_malloc(sizeof(int)*n2y, 64);
+    f2inc = (int*)avs_malloc(sizeof(int)*n2y, 64);
     for(i=0;i<n2y;i++) {
       f2inc[i] = (fs2/dfrq-f2order[i])/(fs2/fs1)+1;
       if (f2order[i+1==n2y ? 0 : i+1] == 0) f2inc[i]--;
     }
 
-    stage2 = (REAL**)_aligned_malloc(sizeof(REAL *)*n2y, 64);
-    stage2[0] = (REAL*)_aligned_malloc(sizeof(REAL)*n2x*n2y, 64);
+    stage2 = (REAL**)avs_malloc(sizeof(REAL *)*n2y, 64);
+    stage2[0] = (REAL*)avs_malloc(sizeof(REAL)*n2x*n2y, 64);
 
     for(i=1;i<n2y;i++) {
       stage2[i] = &(stage2[0][n2x*i]);
@@ -792,27 +790,27 @@ public:
     //    |....B....|....C....|   buf1      n1b2+n1b2
     //|.A.|....D....|             buf2  n2x+n1b2
     //
-    // ‚Ü‚¸inbuf‚©‚çB‚Éosf”{ƒTƒ“ƒvƒŠƒ“ƒO‚µ‚È‚ª‚çƒRƒs[
-    // C‚ÍƒNƒŠƒA
-    // BC‚Éstage 1 filter‚ğ‚©‚¯‚é
-    // D‚ÉB‚ğ‘«‚·
-    // AD‚Éstage 2 filter‚ğ‚©‚¯‚é
-    // D‚ÌŒã‚ë‚ğA‚ÉˆÚ“®
-    // C‚ğD‚ÉƒRƒs[
+    // At first, take samples from inbuf and multiplied by osf, then write those into B.
+    // Clear C.
+    // Apply stage1-filter to B and C.
+    // Add B to D.
+    // Apply stage2-filter to A and D
+    // Move last part of D to A.
+    // Copy C to D.
 
     buf1 = (REAL**)_aligned_malloc(sizeof(REAL *)*nch, 64);
     for(i=0;i<nch;i++)
-      buf1[i] = (REAL*)_aligned_malloc(n1b*sizeof(REAL), 64);
+      buf1[i] = (REAL*)avs_malloc(n1b*sizeof(REAL), 64);
 
-    buf2 = (REAL**)_aligned_malloc(sizeof(REAL *)*nch, 64);
+    buf2 = (REAL**)avs_malloc(sizeof(REAL *)*nch, 64);
     for(i=0;i<nch;i++) {
-      buf2[i] = (REAL*)_aligned_malloc(sizeof(REAL)*(n2x+1+n1b2), 64);
+      buf2[i] = (REAL*)avs_malloc(sizeof(REAL)*(n2x+1+n1b2), 64);
       for(j=0;j<n2x+n1b2;j++) buf2[i][j] = 0;
     }
 
     //rawoutbuf = (unsigned char*)malloc(dbps*nch*((double)n1b2*sfrq/dfrq+1));
-    inbuf = (REAL*)_aligned_malloc(nch*(n1b2/osf+osf+1)*sizeof(REAL), 64);
-    outbuf = (REAL*)_aligned_malloc(sizeof(REAL)*nch*((double)n1b2*sfrq/dfrq+1), 64);
+    inbuf = (REAL*)avs_malloc(nch*(n1b2/osf+osf+1)*sizeof(REAL), 64);
+    outbuf = (REAL*)avs_malloc(sizeof(REAL)*nch*((double)n1b2*sfrq/dfrq+1), 64);
 
     op = outbuf;
 
@@ -836,19 +834,19 @@ public:
 
   ~Downsampler()
   {
-	_aligned_free(stage1);
-	_aligned_free(fft_ip);
-	_aligned_free(fft_w);
-	_aligned_free(f2order);
-	_aligned_free(f2inc);
-	_aligned_free(stage2[0]);
-	_aligned_free(stage2);
-	for(i=0;i<nch;i++) _aligned_free(buf1[i]);
-	_aligned_free(buf1);
-	for(i=0;i<nch;i++) _aligned_free(buf2[i]);
-	_aligned_free(buf2);
-	_aligned_free(inbuf);
-	_aligned_free(outbuf);
+	avs_free(stage1);
+	avs_free(fft_ip);
+	avs_free(fft_w);
+	avs_free(f2order);
+	avs_free(f2inc);
+	avs_free(stage2[0]);
+	avs_free(stage2);
+	for(i=0;i<nch;i++) avs_free(buf1[i]);
+	avs_free(buf1);
+	for(i=0;i<nch;i++) avs_free(buf2[i]);
+	avs_free(buf2);
+	avs_free(inbuf);
+	avs_free(outbuf);
 	//free(rawoutbuf);
   }
 
@@ -904,7 +902,7 @@ public:
 	    fft<REAL>::rdft(n1b,1,buf1[ch],fft_ip,fft_w);
 
 	    buf1[ch][0] = stage1[0]*buf1[ch][0];
-	    buf1[ch][1] = stage1[1]*buf1[ch][1]; 
+	    buf1[ch][1] = stage1[1]*buf1[ch][1];
 
 	    for(i=1;i<n1b2;i++)
 	      {
@@ -1036,7 +1034,7 @@ Resampler_base::Resampler_base(const CONFIG & c)
 	nch=c.nch;
 	sfrq=c.sfrq;
 	dfrq=c.dfrq;
-	
+
 	double noiseamp = 0.18;
 	//double att=0;
 	gain=1;//pow(10.0,-att/20);

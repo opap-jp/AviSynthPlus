@@ -43,8 +43,10 @@
 #include <avs/win.h>
 #include <avs/minmax.h>
 #include <new>
+#include <clocale>
 #include "../internal.h"
 #include "../Prefetcher.h"
+#include "../InternalEnvironment.h"
 
 
 /********************************************************************
@@ -54,7 +56,7 @@
 
 extern const AVSFunction Script_functions[] = {
   { "muldiv",   BUILTIN_FUNC_PREFIX, "iii", Muldiv },
-                
+
   { "floor",    BUILTIN_FUNC_PREFIX, "f", Floor },
   { "ceil",     BUILTIN_FUNC_PREFIX, "f", Ceil },
   { "round",    BUILTIN_FUNC_PREFIX, "f", Round },
@@ -209,17 +211,17 @@ extern const AVSFunction Script_functions[] = {
 
   { "VersionNumber", BUILTIN_FUNC_PREFIX, "", VersionNumber },
   { "VersionString", BUILTIN_FUNC_PREFIX, "", VersionString },
-  
+
   { "HasVideo", BUILTIN_FUNC_PREFIX, "c", HasVideo },
   { "HasAudio", BUILTIN_FUNC_PREFIX, "c", HasAudio },
 
   { "Min", BUILTIN_FUNC_PREFIX, "f+", AvsMin },
   { "Max", BUILTIN_FUNC_PREFIX, "f+", AvsMax },
- 
+
   { "ScriptName", BUILTIN_FUNC_PREFIX, "", ScriptName },
   { "ScriptFile", BUILTIN_FUNC_PREFIX, "", ScriptFile },
   { "ScriptDir",  BUILTIN_FUNC_PREFIX, "", ScriptDir  },
- 
+
   { "PixelType",  BUILTIN_FUNC_PREFIX, "c", PixelType  },
 
   { "AddAutoloadDir",     BUILTIN_FUNC_PREFIX, "s[toFront]b", AddAutoloadDir  },
@@ -229,8 +231,22 @@ extern const AVSFunction Script_functions[] = {
   { "InternalFunctionExists", BUILTIN_FUNC_PREFIX, "s", InternalFunctionExists  },
 
   { "SetFilterMTMode",  BUILTIN_FUNC_PREFIX, "si[force]b", SetFilterMTMode  },
-  { "Prefetch",         BUILTIN_FUNC_PREFIX, "c[threads]i", Prefetcher::Create  },
- 
+  { "Prefetch",         BUILTIN_FUNC_PREFIX, "c[threads]i", Prefetcher::Create },
+  { "SetLogParams",     BUILTIN_FUNC_PREFIX, "[target]s[level]i", SetLogParams },
+  { "LogMsg",              BUILTIN_FUNC_PREFIX, "si", LogMsg },
+
+  { "IsY",       BUILTIN_FUNC_PREFIX, "c", IsY },
+  { "Is420",     BUILTIN_FUNC_PREFIX, "c", Is420 },
+  { "Is422",     BUILTIN_FUNC_PREFIX, "c", Is422 },
+  { "Is444",     BUILTIN_FUNC_PREFIX, "c", Is444 },
+  { "IsRGB48",       BUILTIN_FUNC_PREFIX, "c", IsRGB48 },
+  { "IsRGB64",       BUILTIN_FUNC_PREFIX, "c", IsRGB64 },
+  { "ComponentSize", BUILTIN_FUNC_PREFIX, "c", ComponentSize },
+  { "BitsPerComponent", BUILTIN_FUNC_PREFIX, "c", BitsPerComponent },
+  { "IsYUVA",       BUILTIN_FUNC_PREFIX, "c", IsYUVA },
+  { "IsPlanarRGB",  BUILTIN_FUNC_PREFIX, "c", IsPlanarRGB },
+  { "IsPlanarRGBA", BUILTIN_FUNC_PREFIX, "c", IsPlanarRGBA },
+
   { 0 }
 };
 
@@ -241,8 +257,8 @@ extern const AVSFunction Script_functions[] = {
  *********************************/
 
 ScriptFunction::ScriptFunction( const PExpression& _body, const bool* _param_floats,
-                                const char** _param_names, int param_count ) 
-  : body(_body) 
+                                const char** _param_names, int param_count )
+  : body(_body)
 {
   param_floats = new bool[param_count];
   memcpy(param_floats, _param_floats, param_count*sizeof(const bool));
@@ -250,9 +266,9 @@ ScriptFunction::ScriptFunction( const PExpression& _body, const bool* _param_flo
   param_names = new const char*[param_count];
   memcpy(param_names, _param_names, param_count*sizeof(const char*));
 }
-  
 
-AVSValue ScriptFunction::Execute(AVSValue args, void* user_data, IScriptEnvironment* env) 
+
+AVSValue ScriptFunction::Execute(AVSValue args, void* user_data, IScriptEnvironment* env)
 {
   ScriptFunction* self = (ScriptFunction*)user_data;
   env->PushContext();
@@ -273,7 +289,7 @@ AVSValue ScriptFunction::Execute(AVSValue args, void* user_data, IScriptEnvironm
   return result;
 }
 
-void ScriptFunction::Delete(void* self, IScriptEnvironment*) 
+void ScriptFunction::Delete(void* self, IScriptEnvironment*)
 {
     delete (ScriptFunction*)self;
 }
@@ -320,14 +336,14 @@ DllDirChanger::~DllDirChanger(void)
   delete [] old_directory;
 }
 
-AVSValue Assert(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue Assert(AVSValue args, void*, IScriptEnvironment* env)
 {
   if (!args[0].AsBool())
     env->ThrowError("%s", args[1].Defined() ? args[1].AsString() : "Assert: assertion failed");
   return AVSValue();
 }
 
-AVSValue AssertEval(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue AssertEval(AVSValue args, void*, IScriptEnvironment* env)
 {
   const char* pred = args[0].AsString();
   AVSValue eval_args[] = { args[0].AsString(), "asserted expression" };
@@ -339,7 +355,7 @@ AVSValue AssertEval(AVSValue args, void*, IScriptEnvironment* env)
   return AVSValue();
 }
 
-AVSValue Eval(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue Eval(AVSValue args, void*, IScriptEnvironment* env)
 {
   const char *filename = args[1].AsString(0);
   if (filename) filename = env->SaveString(filename);
@@ -348,25 +364,14 @@ AVSValue Eval(AVSValue args, void*, IScriptEnvironment* env)
   return exp->Evaluate(env);
 }
 
-AVSValue Apply(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue Apply(AVSValue args, void*, IScriptEnvironment* env)
 {
   return env->Invoke(args[0].AsString(), args[1]);
 }
 
-// Helper function - exception protected wrapper
-
-inline AVSValue GetVar(IScriptEnvironment* env, const char* name) {
-  try {
-    return env->GetVar(name);
-  }
-  catch (IScriptEnvironment::NotFound) {}
-
-  return AVSValue();
-}
-
-AVSValue EvalOop(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue EvalOop(AVSValue args, void*, IScriptEnvironment* env)
 {
-  AVSValue prev_last = GetVar(env, "last");  // Store previous last
+  AVSValue prev_last = env->GetVarDef("last");  // Store previous last
   env->SetVar("last", args[0]);              // Set implicit last
 
   AVSValue result;
@@ -381,18 +386,17 @@ AVSValue EvalOop(AVSValue args, void*, IScriptEnvironment* env)
   return result;
 }
 
-AVSValue Import(AVSValue args, void*, IScriptEnvironment* env) 
+AVSValue Import(AVSValue args, void*, IScriptEnvironment* env)
 {
   args = args[0];
   AVSValue result;
 
-  IScriptEnvironment2 *env2 = static_cast<IScriptEnvironment2*>(env);
-  const bool MainScript = (env2->IncrImportDepth() == 1);
+  InternalEnvironment *envi = static_cast<InternalEnvironment*>(env);
+  const bool MainScript = (envi->IncrImportDepth() == 1);
 
-  AVSValue lastScriptName = GetVar(env, "$ScriptName$");
-  AVSValue lastScriptFile = GetVar(env, "$ScriptFile$");
-  AVSValue lastScriptDir  = GetVar(env, "$ScriptDir$");
-
+  AVSValue lastScriptName = env->GetVarDef("$ScriptName$");
+  AVSValue lastScriptFile = env->GetVarDef("$ScriptFile$");
+  AVSValue lastScriptDir  = env->GetVarDef("$ScriptDir$");
   for (int i=0; i<args.ArraySize(); ++i) {
     const char* script_name = args[i].AsString();
 
@@ -416,12 +420,12 @@ AVSValue Import(AVSValue args, void*, IScriptEnvironment* env)
 
     env->SetGlobalVar("$ScriptName$", env->SaveString(full_path));
     env->SetGlobalVar("$ScriptFile$", env->SaveString(file_part));
-    env->SetGlobalVar("$ScriptDir$", env->SaveString(full_path, dir_part_len));
+    env->SetGlobalVar("$ScriptDir$", env->SaveString(full_path, (int)dir_part_len));
     if (MainScript)
     {
       env->SetGlobalVar("$MainScriptName$", env->SaveString(full_path));
       env->SetGlobalVar("$MainScriptFile$", env->SaveString(file_part));
-      env->SetGlobalVar("$MainScriptDir$", env->SaveString(full_path, dir_part_len));
+      env->SetGlobalVar("$MainScriptDir$", env->SaveString(full_path, (int)dir_part_len));
     }
 
     *file_part = 0;
@@ -455,40 +459,40 @@ AVSValue Import(AVSValue args, void*, IScriptEnvironment* env)
   env->SetGlobalVar("$ScriptName$", lastScriptName);
   env->SetGlobalVar("$ScriptFile$", lastScriptFile);
   env->SetGlobalVar("$ScriptDir$",  lastScriptDir);
-  env2->DecrImportDepth();
+  envi->DecrImportDepth();
 
   return result;
 }
 
 
-AVSValue ScriptName(AVSValue args, void*, IScriptEnvironment* env) { return GetVar(env, "$ScriptName$"); }
-AVSValue ScriptFile(AVSValue args, void*, IScriptEnvironment* env) { return GetVar(env, "$ScriptFile$"); }
-AVSValue ScriptDir (AVSValue args, void*, IScriptEnvironment* env) { return GetVar(env, "$ScriptDir$" ); }
+AVSValue ScriptName(AVSValue args, void*, IScriptEnvironment* env) { return env->GetVarDef("$ScriptName$"); }
+AVSValue ScriptFile(AVSValue args, void*, IScriptEnvironment* env) { return env->GetVarDef("$ScriptFile$"); }
+AVSValue ScriptDir (AVSValue args, void*, IScriptEnvironment* env) { return env->GetVarDef("$ScriptDir$" ); }
 
 AVSValue SetMemoryMax(AVSValue args, void*, IScriptEnvironment* env) { return env->SetMemoryMax(args[0].AsInt(0)); }
 AVSValue SetWorkingDir(AVSValue args, void*, IScriptEnvironment* env) { return env->SetWorkingDir(args[0].AsString()); }
 
-AVSValue Muldiv(AVSValue args, void*,IScriptEnvironment* env) { return int(MulDiv(args[0].AsInt(), args[1].AsInt(), args[2].AsInt())); }
+AVSValue Muldiv(AVSValue args, void*, IScriptEnvironment* env) { return int(MulDiv(args[0].AsInt(), args[1].AsInt(), args[2].AsInt())); }
 
-AVSValue Floor(AVSValue args, void*,IScriptEnvironment* env) { return int(floor(args[0].AsFloat())); }
+AVSValue Floor(AVSValue args, void*, IScriptEnvironment* env) { return int(floor(args[0].AsFloat())); }
 AVSValue Ceil(AVSValue args, void*, IScriptEnvironment* env) { return int(ceil(args[0].AsFloat())); }
 AVSValue Round(AVSValue args, void*, IScriptEnvironment* env) { return args[0].AsFloat()<0 ? -int(-args[0].AsFloat()+.5) : int(args[0].AsFloat()+.5); }
 
-AVSValue Acos(AVSValue args, void* user_data, IScriptEnvironment* env) { return acos(args[0].AsFloat()); } 
-AVSValue Asin(AVSValue args, void* user_data, IScriptEnvironment* env) { return asin(args[0].AsFloat()); } 
-AVSValue Atan(AVSValue args, void* user_data, IScriptEnvironment* env) { return atan(args[0].AsFloat()); } 
-AVSValue Atan2(AVSValue args, void* user_data, IScriptEnvironment* env) { return atan2(args[0].AsFloat(), args[1].AsFloat()); } 
+AVSValue Acos(AVSValue args, void* user_data, IScriptEnvironment* env) { return acos(args[0].AsFloat()); }
+AVSValue Asin(AVSValue args, void* user_data, IScriptEnvironment* env) { return asin(args[0].AsFloat()); }
+AVSValue Atan(AVSValue args, void* user_data, IScriptEnvironment* env) { return atan(args[0].AsFloat()); }
+AVSValue Atan2(AVSValue args, void* user_data, IScriptEnvironment* env) { return atan2(args[0].AsFloat(), args[1].AsFloat()); }
 AVSValue Cos(AVSValue args, void* user_data, IScriptEnvironment* env) { return cos(args[0].AsFloat()); }
 AVSValue Cosh(AVSValue args, void* user_data, IScriptEnvironment* env) { return cosh(args[0].AsFloat()); }
 AVSValue Exp(AVSValue args, void* user_data, IScriptEnvironment* env) { return exp(args[0].AsFloat()); }
-AVSValue Fmod(AVSValue args, void* user_data, IScriptEnvironment* env) { return fmod(args[0].AsFloat(), args[1].AsFloat()); } 
+AVSValue Fmod(AVSValue args, void* user_data, IScriptEnvironment* env) { return fmod(args[0].AsFloat(), args[1].AsFloat()); }
 AVSValue Log(AVSValue args, void* user_data, IScriptEnvironment* env) { return log(args[0].AsFloat()); }
 AVSValue Log10(AVSValue args, void* user_data, IScriptEnvironment* env) { return log10(args[0].AsFloat()); }
 AVSValue Pow(AVSValue args, void* user_data, IScriptEnvironment* env) { return pow(args[0].AsFloat(),args[1].AsFloat()); }
 AVSValue Sin(AVSValue args, void* user_data, IScriptEnvironment* env) { return sin(args[0].AsFloat()); }
 AVSValue Sinh(AVSValue args, void* user_data, IScriptEnvironment* env) { return sinh(args[0].AsFloat()); }
-AVSValue Tan(AVSValue args, void* user_data, IScriptEnvironment* env) { return tan(args[0].AsFloat()); } 
-AVSValue Tanh(AVSValue args, void* user_data, IScriptEnvironment* env) { return tanh(args[0].AsFloat()); } 
+AVSValue Tan(AVSValue args, void* user_data, IScriptEnvironment* env) { return tan(args[0].AsFloat()); }
+AVSValue Tanh(AVSValue args, void* user_data, IScriptEnvironment* env) { return tanh(args[0].AsFloat()); }
 AVSValue Sqrt(AVSValue args, void* user_data, IScriptEnvironment* env) { return sqrt(args[0].AsFloat()); }
 
 AVSValue Abs(AVSValue args, void* user_data, IScriptEnvironment* env) { return abs(args[0].AsInt()); }
@@ -564,7 +568,7 @@ AVSValue LeftStr(AVSValue args, void*, IScriptEnvironment* env)
    strncat(result, args[0].AsString(), count);
    AVSValue ret = env->SaveString(result);
    delete[] result;
-   return ret; 
+   return ret;
  }
 
 AVSValue MidStr(AVSValue args, void*, IScriptEnvironment* env)
@@ -599,7 +603,7 @@ AVSValue RightStr(AVSValue args, void*, IScriptEnvironment* env)
    strncat(result, args[0].AsString()+offset, args[1].AsInt());
    AVSValue ret = env->SaveString(result);
    delete[] result;
-   return ret; 
+   return ret;
  }
 
 AVSValue StrCmp(AVSValue args, void*, IScriptEnvironment* env)
@@ -615,9 +619,9 @@ AVSValue StrCmpi(AVSValue args, void*, IScriptEnvironment* env)
 AVSValue FindStr(AVSValue args, void*, IScriptEnvironment* env)
 {
   const char *pdest = strstr( args[0].AsString(),args[1].AsString() );
-  int result = pdest - args[0].AsString() + 1;
+  int result = (int)(pdest - args[0].AsString() + 1);
   if (pdest == NULL) result = 0;
-  return result; 
+  return result;
 }
 
 AVSValue Rand(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -644,16 +648,26 @@ AVSValue Select(AVSValue args, void*, IScriptEnvironment* env)
   return args[1][i];
 }
 
-AVSValue NOP(AVSValue args, void*, IScriptEnvironment* env) { return NULL;}
+AVSValue NOP(AVSValue args, void*, IScriptEnvironment* env) { return 0;}
 
 AVSValue Undefined(AVSValue args, void*, IScriptEnvironment* env) { return AVSValue();}
 
-AVSValue Exist(AVSValue args, void*, IScriptEnvironment* env)
- { struct _finddata_t c_file;
-   const char *filename = args[0].AsString();
-   bool wildcard;
-   wildcard = ((strchr(filename,'*')!=NULL) || (strchr(filename,'?')!=NULL));
-   return _findfirst(filename,&c_file)==-1L ? false : wildcard ? false : true; 
+AVSValue Exist(AVSValue args, void*, IScriptEnvironment* env) {
+  const char *filename = args[0].AsString();
+
+  if (strchr(filename, '*') || strchr(filename, '?')) // wildcard
+      return false;
+
+  struct _finddata_t c_file;
+
+  intptr_t f = _findfirst(filename, &c_file);
+
+  if (f == -1)
+      return false;
+
+  _findclose(f);
+
+  return true;
 }
 
 
@@ -713,8 +727,8 @@ int splint(float xa[], float ya[], float y2a[], int n, float x, float &y, bool c
 	return 0;
 }
 
-// the script functions 
-AVSValue AVSChr(AVSValue args, void* ,IScriptEnvironment* env )
+// the script functions
+AVSValue AVSChr(AVSValue args, void*, IScriptEnvironment* env )
 {
     char s[2];
 
@@ -723,12 +737,12 @@ AVSValue AVSChr(AVSValue args, void* ,IScriptEnvironment* env )
     return env->SaveString(s);
 }
 
-AVSValue AVSOrd(AVSValue args, void* ,IScriptEnvironment* env )
+AVSValue AVSOrd(AVSValue args, void*, IScriptEnvironment* env )
 {
     return (int)args[0].AsString()[0] & 0xFF;
 }
 
-AVSValue FillStr(AVSValue args, void* ,IScriptEnvironment* env )
+AVSValue FillStr(AVSValue args, void*, IScriptEnvironment* env )
 {
     const int count = args[0].AsInt();
     if (count <= 0)
@@ -747,7 +761,7 @@ AVSValue FillStr(AVSValue args, void* ,IScriptEnvironment* env )
 
     AVSValue ret = env->SaveString(buff, total);
     delete[] buff;
-    return ret; 
+    return ret;
 }
 
 AVSValue AVSTime(AVSValue args, void*, IScriptEnvironment* env )
@@ -757,7 +771,8 @@ AVSValue AVSTime(AVSValue args, void*, IScriptEnvironment* env )
 	time(&lt_t);
 	lt = localtime (&lt_t);
     char s[1024];
-	strftime(s,1024,args[0].AsString(""),lt);
+    strftime(s,1024,args[0].AsString(""),lt);
+    s[1023] = 0;
     return env->SaveString(s);
 }
 
@@ -770,7 +785,7 @@ AVSValue Spline(AVSValue args, void*, IScriptEnvironment* env )
 
 	AVSValue coordinates;
 
-	x = (float)args[0].AsFloat(0);
+	x = args[0].AsFloatf(0);
 	coordinates = args[1];
 	cubic = args[2].AsBool(true);
 
@@ -786,14 +801,14 @@ AVSValue Spline(AVSValue args, void*, IScriptEnvironment* env )
   float *y2a = &(buf[(n+1) * 2]);
 
 	for (i=1; i<=n; i++) {
-		xa[i] = (float)coordinates[(i-1)*2].AsFloat(0);
-		ya[i] = (float)coordinates[(i-1)*2+1].AsFloat(0);
+		xa[i] = coordinates[(i-1)*2+0].AsFloatf(0);
+		ya[i] = coordinates[(i-1)*2+1].AsFloatf(0);
 	}
 
 	for (i=1; i<n; i++) {
 		if (xa[i] >= xa[i+1]) env->ThrowError("Spline: all x values have to be different and in ascending order!");
 	}
-	
+
 	spline(xa, ya, n, y2a);
 	splint(xa, ya, y2a, n, x, y, cubic);
 
@@ -827,7 +842,35 @@ AVSValue PixelType (AVSValue args, void*, IScriptEnvironment* env) {
 	  return "YV411";
     case VideoInfo::CS_Y8    :
 	  return "Y8";
-	default:
+    case VideoInfo::CS_YUV420P10 :    return "YUV420P10";
+    case VideoInfo::CS_YUV422P10 :    return "YUV422P10";
+    case VideoInfo::CS_YUV444P10 :    return "YUV444P10";
+    case VideoInfo::CS_Y10       :    return "Y10";
+    case VideoInfo::CS_YUV420P12 :    return "YUV420P12";
+    case VideoInfo::CS_YUV422P12 :    return "YUV422P12";
+    case VideoInfo::CS_YUV444P12 :    return "YUV444P12";
+    case VideoInfo::CS_Y12       :    return "Y12";
+    case VideoInfo::CS_YUV420P14 :    return "YUV420P14";
+    case VideoInfo::CS_YUV422P14 :    return "YUV422P14";
+    case VideoInfo::CS_YUV444P14 :    return "YUV444P14";
+    case VideoInfo::CS_Y14       :    return "Y14";
+    case VideoInfo::CS_YUV420P16 :    return "YUV420P16";
+    case VideoInfo::CS_YUV422P16 :    return "YUV422P16";
+    case VideoInfo::CS_YUV444P16 :    return "YUV444P16";
+    case VideoInfo::CS_Y16       :    return "Y16";
+    case VideoInfo::CS_YUV420PS  :    return "YUV420PS";
+    case VideoInfo::CS_YUV422PS  :    return "YUV422PS";
+    case VideoInfo::CS_YUV444PS  :    return "YUV444PS";
+    case VideoInfo::CS_Y32       :    return "Y32";
+    case VideoInfo::CS_BGR48     :    return "RGB48";
+    case VideoInfo::CS_BGR64     :    return "RGB64";
+    case VideoInfo::CS_RGBP      :    return "RGBP";
+    case VideoInfo::CS_RGBP10    :    return "RGBP10";
+    case VideoInfo::CS_RGBP12    :    return "RGBP12";
+    case VideoInfo::CS_RGBP14    :    return "RGBP14";
+    case VideoInfo::CS_RGBP16    :    return "RGBP16";
+    case VideoInfo::CS_RGBPS     :    return "RGBPS";
+    default:
 	  break;
   }
   return "";
@@ -843,7 +886,7 @@ AVSValue AudioRate(AVSValue args, void*, IScriptEnvironment* env) { return VI(ar
 AVSValue AudioLength(AVSValue args, void*, IScriptEnvironment* env) { return (int)VI(args[0]).num_audio_samples; }  // Truncated to int
 AVSValue AudioLengthLo(AVSValue args, void*, IScriptEnvironment* env) { return (int)(VI(args[0]).num_audio_samples % (unsigned)args[1].AsInt(1000000000)); }
 AVSValue AudioLengthHi(AVSValue args, void*, IScriptEnvironment* env) { return (int)(VI(args[0]).num_audio_samples / (unsigned)args[1].AsInt(1000000000)); }
-AVSValue AudioLengthS(AVSValue args, void*, IScriptEnvironment* env) { char s[32]; return env->SaveString(_i64toa(VI(args[0]).num_audio_samples, s, 10)); } 
+AVSValue AudioLengthS(AVSValue args, void*, IScriptEnvironment* env) { char s[32]; return env->SaveString(_i64toa(VI(args[0]).num_audio_samples, s, 10)); }
 AVSValue AudioLengthF(AVSValue args, void*, IScriptEnvironment* env) { return (float)VI(args[0]).num_audio_samples; } // at least this will give an order of the size
 AVSValue AudioDuration(AVSValue args, void*, IScriptEnvironment* env) {
   const VideoInfo& vi = VI(args[0]);
@@ -878,7 +921,7 @@ AVSValue String(AVSValue args, void*, IScriptEnvironment* env)
 {
   if (args[0].IsString()) return args[0];
   if (args[0].IsBool()) return (args[0].AsBool()?"true":"false");
-  if (args[1].Defined()) {	// WE --> a format parameter is present 
+  if (args[1].Defined()) {	// WE --> a format parameter is present
 		if (args[0].IsFloat()) {	//if it is an Int: IsFloat gives True, also !
 			return  env->Sprintf(args[1].AsString("%f"),args[0].AsFloat());
 		}
@@ -890,14 +933,20 @@ AVSValue String(AVSValue args, void*, IScriptEnvironment* env)
 	  }
 	  if (args[0].IsFloat()) {
 		char s[30];
-		sprintf(s,"%lf",args[0].AsFloat());
+#ifdef MSVC
+    _locale_t locale = _create_locale(LC_NUMERIC, "C"); // decimal point: dot
+    _sprintf_l(s,"%lf", locale, args[0].AsFloat());
+    _free_locale(locale);
+#else
+    sprintf(s,"%lf", args[0].AsFloat());
+#endif
 		return env->SaveString(s);
 	  }
   }
   return "";
-} 
+}
 
-AVSValue Hex(AVSValue args, void*, IScriptEnvironment* env) { char s[9]; return env->SaveString(_itoa(args[0].AsInt(), s, 16)); } 
+AVSValue Hex(AVSValue args, void*, IScriptEnvironment* env) { char s[9]; return env->SaveString(_itoa(args[0].AsInt(), s, 16)); }
 
 AVSValue IsBool(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsBool(); }
 AVSValue IsInt(AVSValue args, void*, IScriptEnvironment* env) { return args[0].IsInt(); }
@@ -911,8 +960,8 @@ AVSValue VersionNumber(AVSValue args, void*, IScriptEnvironment* env) { return A
 AVSValue VersionString(AVSValue args, void*, IScriptEnvironment* env) { return AVS_FULLVERSION; }
 
 AVSValue Int(AVSValue args, void*, IScriptEnvironment* env) { return int(args[0].AsFloat()); }
-AVSValue Frac(AVSValue args, void*, IScriptEnvironment* env) { return args[0].AsFloat() - int(args[0].AsFloat()); }
-AVSValue Float(AVSValue args, void*,IScriptEnvironment* env) { return args[0].AsFloat(); }
+AVSValue Frac(AVSValue args, void*, IScriptEnvironment* env) { return args[0].AsFloat() - int64_t(args[0].AsFloat()); }
+AVSValue Float(AVSValue args, void*, IScriptEnvironment* env) { return args[0].AsFloat(); }
 
 AVSValue Value(AVSValue args, void*, IScriptEnvironment* env) { char *stopstring; return strtod(args[0].AsString(),&stopstring); }
 AVSValue HexValue(AVSValue args, void*, IScriptEnvironment* env) { char *stopstring; return (int)strtoul(args[0].AsString(),&stopstring,16); }
@@ -939,9 +988,9 @@ AVSValue AvsMin(AVSValue args, void*, IScriptEnvironment* env )
     return V;
   }
   else {
-    float V = (float)args[0][0].AsFloat();
+    float V = args[0][0].AsFloatf();
     for (i=1; i < n; i++)
-      V = min(V, (float)args[0][i].AsFloat());
+      V = min(V, args[0][i].AsFloatf());
     return V;
   }
 }
@@ -968,9 +1017,9 @@ AVSValue AvsMax(AVSValue args, void*, IScriptEnvironment* env )
     return V;
   }
   else {
-    float V = (float)args[0][0].AsFloat();
+    float V = args[0][0].AsFloatf();
     for (i=1; i < n; i++)
-      V = max(V, (float)args[0][i].AsFloat());
+      V = max(V, args[0][i].AsFloatf());
     return V;
   }
 }
@@ -1013,3 +1062,68 @@ AVSValue SetFilterMTMode (AVSValue args, void*, IScriptEnvironment* env)
   env2->SetFilterMTMode(args[0].AsString(), (MtMode)args[1].AsInt(), args[2].AsBool(false));
   return AVSValue();
 }
+
+AVSValue SetLogParams(AVSValue args, void*, IScriptEnvironment* env)
+{
+    const char *target = NULL;
+    int level = -1;
+
+    if (1 <= args.ArraySize())
+    {
+        if (args[0].IsString()) {
+            target = args[0].AsString();
+        }
+        else {
+            env->ThrowError("1st argument to SetLogParams() must be a string.");
+            return AVSValue();
+        }
+    }
+
+    if (2 <= args.ArraySize())
+    {
+        if (args[1].IsInt()) {
+            level = args[1].AsInt();
+        }
+        else {
+            env->ThrowError("2nd argument to SetLogParams() must be an integer.");
+            return AVSValue();
+        }
+    }
+
+    if (3 <= args.ArraySize())
+    {
+        env->ThrowError("Too many arguments to SetLogParams().");
+        return AVSValue();
+    }
+
+    InternalEnvironment *envi = static_cast<InternalEnvironment*>(env);
+    envi->SetLogParams(target, level);
+    return AVSValue();
+}
+
+AVSValue LogMsg(AVSValue args, void*, IScriptEnvironment* env)
+{
+    if ((args.ArraySize() != 2) || !args[0].IsString() || !args[1].IsInt())
+    {
+        env->ThrowError("Invalid parameters to Log() function.");
+    }
+    else
+    {
+        InternalEnvironment *envi = static_cast<InternalEnvironment*>(env);
+        envi->LogMsg(args[1].AsInt(), args[0].AsString());
+    }
+    return AVSValue();
+}
+
+AVSValue IsY(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).IsY8(); }
+AVSValue Is420(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).Is420(); }
+AVSValue Is422(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).Is422(); }
+AVSValue Is444(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).Is444(); }
+AVSValue IsRGB48(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).IsRGB48(); }
+AVSValue IsRGB64(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).IsRGB64(); }
+AVSValue ComponentSize(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).ComponentSize(); }
+AVSValue BitsPerComponent(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).BitsPerComponent(); }
+AVSValue IsYUVA(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).IsYUVA(); }
+AVSValue IsPlanarRGB(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).IsPlanarRGB(); }
+AVSValue IsPlanarRGBA(AVSValue args, void*, IScriptEnvironment* env) { return VI(args[0]).IsPlanarRGBA(); }
+

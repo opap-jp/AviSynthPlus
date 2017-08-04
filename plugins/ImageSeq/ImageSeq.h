@@ -35,12 +35,10 @@
 #ifndef __Image_Sequence_H__
 #define __Image_Sequence_H__
 
-#include <sstream>
-#include <fstream>
-#include <cassert>
-
 #include "il.h"
 #include <avs/win.h>
+#include <cassert>
+#include <fstream>
 
 
 class ImageWriter : public GenericVideoFilter 
@@ -75,8 +73,8 @@ class ImageReader : public IClip
 {
 public:
   ImageReader(const char * _base_name, const int _start, const int _end,
-              const float _fps, bool _use_DevIL, bool _info, const char * _pixel,
-			  bool _animation, IScriptEnvironment* env);
+              const double _fps, bool _use_DevIL, bool _info, const char * _pixel,
+              bool _animation, IScriptEnvironment* env);
   ~ImageReader();
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);

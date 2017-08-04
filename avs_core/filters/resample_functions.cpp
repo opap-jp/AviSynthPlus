@@ -203,9 +203,8 @@ GaussianFilter::GaussianFilter(double p = 30.0) {
 }
 
 double GaussianFilter::f(double value) {
-  value = fabs(value);
-	double p = param*0.1;
-	return pow(2.0, - p*value*value);
+  double p = param*0.1;
+  return pow(2.0, - p*value*value);
 }
 
 /***********************
@@ -289,6 +288,7 @@ ResamplingProgram* ResamplingFunction::GetResamplingProgram(int source_size, dou
     for (int k = 0; k < fir_filter_size; ++k) {
       double new_value = value + f((start_pos+k - ok_pos) * filter_step) / total;
       program->pixel_coefficient[i*fir_filter_size+k] = short(int(new_value*FPScale+0.5) - int(value*FPScale+0.5)); // to make it round across pixels
+      program->pixel_coefficient_float[i*fir_filter_size + k] = float(new_value - value); // no scaling for float
       value = new_value;
     }
 

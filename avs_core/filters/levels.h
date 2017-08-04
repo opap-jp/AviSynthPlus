@@ -52,7 +52,6 @@ class Levels : public GenericVideoFilter
 public:
   Levels( PClip _child, int in_min, double gamma, int in_max, int out_min, int out_max, bool coring, bool _dither,
           IScriptEnvironment* env );
-  ~Levels();
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
@@ -64,7 +63,6 @@ public:
 private:
   BYTE *map, *mapchroma;
   bool dither;
-  IScriptEnvironment2 *env2_unsafe; //don't use outside of ctor/dtor
 };
 
 
@@ -79,7 +77,6 @@ public:
                           double rb, double gb, double bb, double ab,
                           double rg, double gg, double bg, double ag,
                           bool _analyze, bool _dither, IScriptEnvironment* env);
-  ~RGBAdjust();
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
@@ -92,7 +89,6 @@ private:
   bool analyze;
   bool dither;
   BYTE *mapR, *mapG, *mapB, *mapA;
-  IScriptEnvironment2 *env2_unsafe; //don't use outside of ctor/dtor
 };
 
 
@@ -101,11 +97,9 @@ private:
 class Tweak : public GenericVideoFilter
 {
 public:
-  Tweak( PClip _child, double _hue, double _sat, double _bright, double _cont, bool _coring, bool _sse,
-                       double _startHue, double _endHue, double _maxSat, double _minSat, double _interp,
-                       bool _dither, IScriptEnvironment* env );
-
-  ~Tweak();
+  Tweak(PClip _child, double _hue, double _sat, double _bright, double _cont, bool _coring, bool _sse,
+    double _startHue, double _endHue, double _maxSat, double _minSat, double _interp,
+    bool _dither, bool _realcalc, IScriptEnvironment* env);
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
@@ -119,10 +113,12 @@ private:
     int Sin, Cos;
     int Sat, Bright, Cont;
     bool coring, sse, dither;
+    
+    bool realcalc; // no lookup, realtime calculation, always for 16/32 bits
+    double dhue, dsat, dbright, dcont, dstartHue, dendHue, dmaxSat, dminSat, dinterp;
 
     BYTE *map;
     uint16_t *mapUV;
-    IScriptEnvironment2 *env2_unsafe; //don't use outside of ctor/dtor
 };
 
 
@@ -142,12 +138,6 @@ public:
 private:
     BYTE mapY[256*256];
 };
-
-
-/* Helper function for Tweak and MaskHS filters */
-bool ProcessPixel(int X, int Y, double startHue, double endHue,
-                  double maxSat, double minSat, double p, int &iSat);
-
 
 #endif  // __Levels_H__
 

@@ -175,8 +175,6 @@ AVSValue Float(AVSValue args, void*,IScriptEnvironment* env);
 AVSValue Value(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue HexValue(AVSValue args, void*, IScriptEnvironment* env);
 
-AVSValue Sign(AVSValue args, void*, IScriptEnvironment* env);
-
 AVSValue BitAnd(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue BitNot(AVSValue args, void*, IScriptEnvironment* env);
 AVSValue BitOr(AVSValue args, void*, IScriptEnvironment* env);
@@ -240,5 +238,19 @@ AVSValue FunctionExists (AVSValue args, void*, IScriptEnvironment* env);
 AVSValue InternalFunctionExists (AVSValue args, void*, IScriptEnvironment* env);
 
 AVSValue SetFilterMTMode (AVSValue args, void*, IScriptEnvironment* env);
+AVSValue SetLogParams(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue LogMsg(AVSValue args, void*, IScriptEnvironment* env);
+
+AVSValue IsY(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue Is420(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue Is422(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue Is444(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue IsRGB48(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue IsRGB64(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue ComponentSize(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue BitsPerComponent(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue IsYUVA(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue IsPlanarRGB(AVSValue args, void*, IScriptEnvironment* env);
+AVSValue IsPlanarRGBA(AVSValue args, void*, IScriptEnvironment* env);
 
 #endif  // __Script_H__

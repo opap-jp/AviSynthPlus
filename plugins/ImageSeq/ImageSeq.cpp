@@ -56,14 +56,13 @@ AVSValue __cdecl Create_ImageReader(AVSValue args, void*, IScriptEnvironment* en
 {
   const char * path = args[0].AsString("c:\\%06d.ebmp");
 
-  ImageReader *IR = new ImageReader(path, args[1].AsInt(0), args[2].AsInt(1000), (float)args[3].AsFloat(24.0f),
+  ImageReader *IR = new ImageReader(path, args[1].AsInt(0), args[2].AsInt(1000), (float)args[3].AsDblDef(24.0),
                                     args[4].AsBool(false), args[5].AsBool(false), args[6].AsString("rgb24"),
                                     /*animation*/ false, env);
   // If we are returning a stream of 2 or more copies of the same image
   // then use FreezeFrame and the Cache to minimise any reloading.
   if (IR->framecopies > 1) {
-    AVSValue cache = env->Invoke("Cache", AVSValue(IR));
-    AVSValue ff_args[4] = { cache, 0, IR->framecopies-1, 0 };
+    AVSValue ff_args[4] = { IR, 0, IR->framecopies-1, 0 };
     return env->Invoke("FreezeFrame", AVSValue(ff_args, 4)).AsClip();
   }
 
@@ -75,7 +74,7 @@ AVSValue __cdecl Create_Animated(AVSValue args, void*, IScriptEnvironment* env)
   if (!args[0].IsString())
     env->ThrowError("ImageSourceAnim: You must specify a filename.");
 
-  return new ImageReader(args[0].AsString(), 0, 0, (float)args[1].AsFloat(24.0f), /*use_DevIL*/ true,
+  return new ImageReader(args[0].AsString(), 0, 0, (float)args[1].AsDblDef(24.0), /*use_DevIL*/ true,
                          args[2].AsBool(false), args[3].AsString("rgb32"), /*animation*/ true, env);
 }
 

@@ -56,17 +56,6 @@ extern const AVSFunction Conditional_filters[] = {
 
 #define W_DIVISOR 5  // Width divisor for onscreen messages
 
-// Helper function - exception protected wrapper
-
-inline AVSValue GetVar(IScriptEnvironment* env, const char* name) {
-  try {
-    return env->GetVar(name);
-  }
-  catch (const IScriptEnvironment::NotFound&) {}
-
-  return AVSValue();
-}
-
 
 /********************************
  * Conditional Select
@@ -103,11 +92,15 @@ ConditionalSelect::~ConditionalSelect() {
   delete[] child_array;
 }
 
+int __stdcall ConditionalSelect::SetCacheHints(int cachehints, int frame_range)
+{
+  return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+}
 
 PVideoFrame __stdcall ConditionalSelect::GetFrame(int n, IScriptEnvironment* env) {
 
-  AVSValue prev_last = GetVar(env, "last");  // Store previous last
-  AVSValue prev_current_frame = GetVar(env, "current_frame");  // Store previous current_frame
+  AVSValue prev_last = env->GetVarDef("last");  // Store previous last
+  AVSValue prev_current_frame = env->GetVarDef("current_frame");  // Store previous current_frame
 
   env->SetVar("last", (AVSValue)child);      // Set implicit last
   env->SetVar("current_frame", (AVSValue)n); // Set frame to be tested by the conditional filters.
@@ -247,14 +240,18 @@ ConditionalFilter::ConditionalFilter(PClip _child, PClip _source1, PClip _source
 const char* const t_TRUE="TRUE"; 
 const char* const t_FALSE="FALSE";
 
+int __stdcall ConditionalFilter::SetCacheHints(int cachehints, int frame_range)
+{
+  return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+}
 
 PVideoFrame __stdcall ConditionalFilter::GetFrame(int n, IScriptEnvironment* env) {
 
   VideoInfo vi1 = source1->GetVideoInfo();
   VideoInfo vi2 = source2->GetVideoInfo();
 
-  AVSValue prev_last = GetVar(env, "last");  // Store previous last
-  AVSValue prev_current_frame = GetVar(env, "current_frame");  // Store previous current_frame
+  AVSValue prev_last = env->GetVarDef("last");  // Store previous last
+  AVSValue prev_current_frame = env->GetVarDef("current_frame");  // Store previous current_frame
 
   env->SetVar("last",(AVSValue)child);       // Set implicit last
   env->SetVar("current_frame",(AVSValue)n);  // Set frame to be tested by the conditional filters.
@@ -288,8 +285,8 @@ PVideoFrame __stdcall ConditionalFilter::GetFrame(int n, IScriptEnvironment* env
 
   int e1 = 0;
   int e2 = 0;
-  float f1 = 0.0f;
-  float f2 = 0.0f;
+  double f1 = 0.0;
+  double f2 = 0.0;
   try {
     if (e1_result.IsString()) {
       if (!e2_result.IsString())
@@ -349,7 +346,7 @@ PVideoFrame __stdcall ConditionalFilter::GetFrame(int n, IScriptEnvironment* env
 
   } else {  // Float compare
     if (evaluator&EQUALS) 
-      if (fabs(f1-f2)<0.000001f) state = true;   // Exact equal will sometimes be rounded to wrong values.
+      if (fabs(f1-f2)<0.000001) state = true;   // Exact equal will sometimes be rounded to wrong values.
 
     if (evaluator&GREATERTHAN) 
       if (f1 > f2) state = true;
@@ -418,11 +415,17 @@ AVSValue __cdecl ConditionalFilter::Create(AVSValue args, void* user_data, IScri
 ScriptClip::ScriptClip(PClip _child, AVSValue  _script, bool _show, bool _only_eval, bool _eval_after_frame, IScriptEnvironment* env) :
   GenericVideoFilter(_child), script(_script), show(_show), only_eval(_only_eval), eval_after(_eval_after_frame) {
 
-  }
+}
+
+
+int __stdcall ScriptClip::SetCacheHints(int cachehints, int frame_range)
+{
+  return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+}
 
 PVideoFrame __stdcall ScriptClip::GetFrame(int n, IScriptEnvironment* env) {
-  AVSValue prev_last = GetVar(env, "last");  // Store previous last
-  AVSValue prev_current_frame = GetVar(env, "current_frame");  // Store previous current_frame
+  AVSValue prev_last = env->GetVarDef("last");  // Store previous last
+  AVSValue prev_current_frame = env->GetVarDef("current_frame");  // Store previous current_frame
 
   env->SetVar("last",(AVSValue)child);       // Set explicit last
   env->SetVar("current_frame",(AVSValue)n);  // Set frame to be tested by the conditional filters.

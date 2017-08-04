@@ -14,7 +14,7 @@
 #include <cstdarg>
 
 
-struct AVS_Clip 
+struct AVS_Clip
 {
 	PClip clip;
 	IScriptEnvironment * env;
@@ -34,13 +34,21 @@ public:
 	const VideoInfo & __stdcall GetVideoInfo();
 	bool __stdcall GetParity(int n);
 	int __stdcall SetCacheHints(int cachehints,int frame_range);
-	__stdcall ~C_VideoFilter();
+	AVSC_CC ~C_VideoFilter();
 };
 
 /////////////////////////////////////////////////////////////////////
 //
 //
 //
+
+extern "C"
+int AVSC_CC avs_is_rgb48(const AVS_VideoInfo * p)
+  { return ((p->pixel_type & AVS_CS_BGR24) == AVS_CS_BGR24) && ((p->pixel_type & AVS_CS_SAMPLE_BITS_MASK) == AVS_CS_SAMPLE_BITS_16); }
+
+extern "C"
+int AVSC_CC avs_is_rgb64(const AVS_VideoInfo * p)
+  { return ((p->pixel_type & AVS_CS_BGR32) == AVS_CS_BGR32) && ((p->pixel_type & AVS_CS_SAMPLE_BITS_MASK) == AVS_CS_SAMPLE_BITS_16); }
 
 extern "C"
 int AVSC_CC avs_is_yv24(const AVS_VideoInfo * p)
@@ -63,13 +71,77 @@ int AVSC_CC avs_is_y8(const AVS_VideoInfo * p)
   { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_Y8    & AVS_CS_PLANAR_FILTER); }
 
 extern "C"
+int AVSC_CC avs_is_yuv444p16(const AVS_VideoInfo * p)
+  { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_YUV444P16 & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
+int AVSC_CC avs_is_yuv422p16(const AVS_VideoInfo * p)
+  { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_YUV422P16 & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
+int AVSC_CC avs_is_yuv420p16(const AVS_VideoInfo * p)
+  { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_YUV420P16 & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
+int AVSC_CC avs_is_y16(const AVS_VideoInfo * p)
+  { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_Y16   & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
+int AVSC_CC avs_is_yuv444ps(const AVS_VideoInfo * p)
+  { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_YUV444PS & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
+int AVSC_CC avs_is_yuv422ps(const AVS_VideoInfo * p)
+  { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_YUV422PS & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
+int AVSC_CC avs_is_yuv420ps(const AVS_VideoInfo * p)
+  { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_YUV420PS & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
+int AVSC_CC avs_is_y32(const AVS_VideoInfo * p)
+  { return (p->pixel_type & AVS_CS_PLANAR_MASK) == (AVS_CS_Y32   & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
+int AVSC_CC avs_is_444(const AVS_VideoInfo * p)
+{ return ((p->pixel_type & AVS_CS_PLANAR_MASK & ~AVS_CS_SAMPLE_BITS_MASK) == (AVS_CS_GENERIC_YUV444 & AVS_CS_PLANAR_FILTER)) ||
+         ((p->pixel_type & AVS_CS_PLANAR_MASK & ~AVS_CS_SAMPLE_BITS_MASK) == (AVS_CS_GENERIC_YUVA444 & AVS_CS_PLANAR_FILTER)); }
+
+extern "C"
+int AVSC_CC avs_is_422(const AVS_VideoInfo * p)
+{ return ((p->pixel_type & AVS_CS_PLANAR_MASK & ~AVS_CS_SAMPLE_BITS_MASK) == (AVS_CS_GENERIC_YUV422 & AVS_CS_PLANAR_FILTER)) ||
+         ((p->pixel_type & AVS_CS_PLANAR_MASK & ~AVS_CS_SAMPLE_BITS_MASK) == (AVS_CS_GENERIC_YUVA422 & AVS_CS_PLANAR_FILTER)); }
+
+extern "C"
+int AVSC_CC avs_is_420(const AVS_VideoInfo * p)
+{ return ((p->pixel_type & AVS_CS_PLANAR_MASK & ~AVS_CS_SAMPLE_BITS_MASK) == (AVS_CS_GENERIC_YUV420 & AVS_CS_PLANAR_FILTER)) ||
+         ((p->pixel_type & AVS_CS_PLANAR_MASK & ~AVS_CS_SAMPLE_BITS_MASK) == (AVS_CS_GENERIC_YUVA420 & AVS_CS_PLANAR_FILTER)); }
+
+extern "C"
+int AVSC_CC avs_is_y(const AVS_VideoInfo * p)
+{ return (p->pixel_type & AVS_CS_PLANAR_MASK & ~AVS_CS_SAMPLE_BITS_MASK) == (AVS_CS_GENERIC_Y & AVS_CS_PLANAR_FILTER); }
+
+extern "C"
 int AVSC_CC avs_is_color_space(const AVS_VideoInfo * p, int c_space)
 {
-  return avs_is_planar(p) ?
+    return avs_is_planar(p) ?
     ((p->pixel_type & AVS_CS_PLANAR_MASK) == (c_space & AVS_CS_PLANAR_FILTER))
-  :
-    ((p->pixel_type & c_space) == c_space);
+    :
+    ( ((p->pixel_type & ~AVS_CS_SAMPLE_BITS_MASK & c_space) == (c_space & ~AVS_CS_SAMPLE_BITS_MASK)) && // RGB got sample bits
+      ((p->pixel_type & AVS_CS_SAMPLE_BITS_MASK) == (c_space & AVS_CS_SAMPLE_BITS_MASK)) );
 }
+
+extern "C"
+int AVSC_CC avs_is_yuva(const AVS_VideoInfo * p)
+{ return !!(p->pixel_type&AVS_CS_YUVA ); }
+
+extern "C"
+int AVSC_CC avs_is_planar_rgb(const AVS_VideoInfo * p)
+{ return !!(p->pixel_type&AVS_CS_PLANAR) && !!(p->pixel_type&AVS_CS_BGR) && !!(p->pixel_type&AVS_CS_RGB_TYPE); }
+
+extern "C"
+int AVSC_CC avs_is_planar_rgba(const AVS_VideoInfo * p)
+{ return !!(p->pixel_type&AVS_CS_PLANAR) && !!(p->pixel_type&AVS_CS_BGR) && !!(p->pixel_type&AVS_CS_RGBA_TYPE); }
 
 extern "C"
 int AVSC_CC avs_get_plane_width_subsampling(const AVS_VideoInfo * p, int plane)
@@ -78,6 +150,7 @@ int AVSC_CC avs_get_plane_width_subsampling(const AVS_VideoInfo * p, int plane)
     return ((VideoInfo *)p)->GetPlaneWidthSubsampling(plane);
   }
   catch (const AvisynthError &err) {
+    (void)err;  // silence warning about unused variable; variable is kept for debugging
     return -1;
   }
 }
@@ -89,6 +162,7 @@ int AVSC_CC avs_get_plane_height_subsampling(const AVS_VideoInfo * p, int plane)
     return ((VideoInfo *)p)->GetPlaneHeightSubsampling(plane);
   }
   catch (const AvisynthError &err) {
+    (void)err;  // silence warning about unused variable; variable is kept for debugging
     return -1;
   }
 }
@@ -105,6 +179,9 @@ int AVSC_CC avs_bytes_from_pixels(const AVS_VideoInfo * p, int pixels)
   return ((VideoInfo *)p)->BytesFromPixels(pixels);
 }
 
+// This method should be called avs_row_size_p,
+// but we won't change it anymore to avoid breaking
+// the interface.
 extern "C"
 int AVSC_CC avs_row_size(const AVS_VideoInfo * p, int plane)
 {
@@ -165,7 +242,7 @@ int AVSC_CC avs_get_height_p(const AVS_VideoFrame * p, int plane)
   return p->height;
 }
 
-extern "C" 
+extern "C"
 const BYTE * AVSC_CC avs_get_read_ptr_p(const AVS_VideoFrame * p, int plane)
 {
   switch (plane) {
@@ -213,12 +290,32 @@ AVS_VideoFrame * AVSC_CC avs_copy_video_frame(AVS_VideoFrame * f)
 }
 
 
+extern "C"
+int AVSC_CC avs_num_components(const AVS_VideoInfo * p)
+{
+    return ((VideoInfo *)p)->NumComponents();
+}
+
+extern "C"
+int AVSC_CC avs_component_size(const AVS_VideoInfo * p)
+{
+    return ((VideoInfo *)p)->ComponentSize();
+}
+
+extern "C"
+int AVSC_CC avs_bits_per_component(const AVS_VideoInfo * p)
+{
+    return ((VideoInfo *)p)->BitsPerComponent();
+}
+
+
+
 /////////////////////////////////////////////////////////////////////
 //
 // C_VideoFilter
 //
 
-PVideoFrame C_VideoFilter::GetFrame(int n, IScriptEnvironment* env) 
+PVideoFrame C_VideoFilter::GetFrame(int n, IScriptEnvironment* env)
 {
 	if (d.get_frame) {
 		d.error = 0;
@@ -226,14 +323,14 @@ PVideoFrame C_VideoFilter::GetFrame(int n, IScriptEnvironment* env)
 		if (d.error)
 			throw AvisynthError(d.error);
 		PVideoFrame fr((VideoFrame *)f);
-    ((PVideoFrame *)&f)->~PVideoFrame();  
+    ((PVideoFrame *)&f)->~PVideoFrame();
     return fr;
 	} else {
-		return d.child->clip->GetFrame(n, env); 
+		return d.child->clip->GetFrame(n, env);
 	}
 }
 
-void __stdcall C_VideoFilter::GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) 
+void __stdcall C_VideoFilter::GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env)
 {
 	if (d.get_audio) {
 		d.error = 0;
@@ -245,12 +342,12 @@ void __stdcall C_VideoFilter::GetAudio(void* buf, __int64 start, __int64 count, 
 	}
 }
 
-const VideoInfo& __stdcall C_VideoFilter::GetVideoInfo() 
+const VideoInfo& __stdcall C_VideoFilter::GetVideoInfo()
 {
-	return *(VideoInfo *)&d.vi; 
+	return *(VideoInfo *)&d.vi;
 }
 
-bool __stdcall C_VideoFilter::GetParity(int n) 
+bool __stdcall C_VideoFilter::GetParity(int n)
 {
 	if (d.get_parity) {
 		d.error = 0;
@@ -263,7 +360,7 @@ bool __stdcall C_VideoFilter::GetParity(int n)
 	}
 }
 
-int __stdcall C_VideoFilter::SetCacheHints(int cachehints, int frame_range) 
+int __stdcall C_VideoFilter::SetCacheHints(int cachehints, int frame_range)
 {
 	if (d.set_cache_hints) {
 		d.error = 0;
@@ -329,7 +426,7 @@ AVS_VideoFrame * AVSC_CC avs_get_frame(AVS_Clip * p, int n)
 	} catch (const AvisynthError &err) {
 		p->error = err.msg;
 		return 0;
-	} 
+	}
 }
 
 extern "C"
@@ -341,7 +438,7 @@ int AVSC_CC avs_get_parity(AVS_Clip * p, int n) // return field parity if field_
 	} catch (const AvisynthError &err) {
 		p->error = err.msg;
 		return -1;
-	} 
+	}
 }
 
 extern "C"
@@ -354,7 +451,7 @@ int AVSC_CC avs_get_audio(AVS_Clip * p, void * buf, INT64 start, INT64 count) //
 	} catch (const AvisynthError &err) {
 		p->error = err.msg;
 		return -1;
-	} 
+	}
 }
 
 extern "C"
@@ -459,8 +556,8 @@ AVSValue __cdecl create_c_video_filter(AVSValue args, void * user_data,
 }
 
 extern "C"
-int AVSC_CC 
-  avs_add_function(AVS_ScriptEnvironment * p, const char * name, const char * params, 
+int AVSC_CC
+  avs_add_function(AVS_ScriptEnvironment * p, const char * name, const char * params,
 				   AVS_ApplyFunc applyf, void * user_data)
 {
 	C_VideoFilter_UserData *dd, *d = new C_VideoFilter_UserData;
@@ -474,7 +571,7 @@ int AVSC_CC
 	} catch (AvisynthError & err) {
 		p->error = err.msg;
 		return -1;
-	} 
+	}
 	return 0;
 }
 
@@ -642,7 +739,7 @@ void __cdecl shutdown_func_bridge(void* user_data, IScriptEnvironment* env)
 }
 
 extern "C"
-void AVSC_CC avs_at_exit(AVS_ScriptEnvironment * p, 
+void AVSC_CC avs_at_exit(AVS_ScriptEnvironment * p,
                            AVS_ShutdownFunc function, void * user_data)
 {
   p->error = 0;
@@ -668,7 +765,7 @@ int AVSC_CC avs_check_version(AVS_ScriptEnvironment * p, int version)
 }
 
 extern "C"
-AVS_VideoFrame * AVSC_CC avs_subframe(AVS_ScriptEnvironment * p, AVS_VideoFrame * src0, 
+AVS_VideoFrame * AVSC_CC avs_subframe(AVS_ScriptEnvironment * p, AVS_VideoFrame * src0,
 							  int rel_offset, int new_pitch, int new_row_size, int new_height)
 {
 	p->error = 0;
@@ -684,7 +781,7 @@ AVS_VideoFrame * AVSC_CC avs_subframe(AVS_ScriptEnvironment * p, AVS_VideoFrame 
 }
 
 extern "C"
-AVS_VideoFrame * AVSC_CC avs_subframe_planar(AVS_ScriptEnvironment * p, AVS_VideoFrame * src0, 
+AVS_VideoFrame * AVSC_CC avs_subframe_planar(AVS_ScriptEnvironment * p, AVS_VideoFrame * src0,
 							  int rel_offset, int new_pitch, int new_row_size, int new_height,
 							  int rel_offsetU, int rel_offsetV, int new_pitchUV)
 {
@@ -726,10 +823,10 @@ int AVSC_CC avs_set_working_dir(AVS_ScriptEnvironment * p, const char * newdir)
 }
 /////////////////////////////////////////////////////////////////////
 //
-// 
+//
 //
 
-extern "C" 
+extern "C"
 AVS_ScriptEnvironment * AVSC_CC avs_create_script_environment(int version)
 {
 	AVS_ScriptEnvironment * e = new AVS_ScriptEnvironment;
@@ -746,17 +843,19 @@ AVS_ScriptEnvironment * AVSC_CC avs_create_script_environment(int version)
 
 /////////////////////////////////////////////////////////////////////
 //
-// 
+//
 //
 
-extern "C" 
+extern "C"
 void AVSC_CC avs_delete_script_environment(AVS_ScriptEnvironment * e)
 {
 	if (e) {
 		if (e->env) {
 			try {
 				e->env->DeleteScriptEnvironment();
-			} catch (const AvisynthError &err) { }
+			} catch (const AvisynthError &err) {
+                (void)err;  // silence warning about unused variable; variable is kept for debugging
+            }
 			e->env = 0;
 		}
 		delete e;
